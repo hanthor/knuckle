@@ -159,10 +159,11 @@ func TestValidateNetworkStaticValid(t *testing.T) {
 w, _, _, _ := newTestWizard()
 w.State.CurrentStep = model.StepNetwork
 w.State.Config.Network = model.NetworkConfig{
-Mode:    model.NetworkStatic,
-Address: "192.168.1.10/24",
-Gateway: "192.168.1.1",
-DNS:     []string{"8.8.8.8", "1.1.1.1"},
+Mode:      model.NetworkStatic,
+Interface: "eth0",
+Address:   "192.168.1.10/24",
+Gateway:   "192.168.1.1",
+DNS:       []string{"8.8.8.8", "1.1.1.1"},
 }
 
 if err := w.ValidateCurrentStep(); err != nil {
@@ -174,9 +175,10 @@ func TestValidateNetworkStaticInvalid(t *testing.T) {
 w, _, _, _ := newTestWizard()
 w.State.CurrentStep = model.StepNetwork
 w.State.Config.Network = model.NetworkConfig{
-Mode:    model.NetworkStatic,
-Address: "not-a-cidr",
-Gateway: "192.168.1.1",
+Mode:      model.NetworkStatic,
+Interface: "eth0",
+Address:   "not-a-cidr",
+Gateway:   "192.168.1.1",
 }
 
 err := w.ValidateCurrentStep()
@@ -563,5 +565,25 @@ t.Error("expected butane to contain variant header")
 }
 if !strings.Contains(butane, "test-node") {
 t.Error("expected butane to contain hostname")
+}
+}
+
+func TestValidateNetworkRequiresInterface(t *testing.T) {
+w, _, _, _ := newTestWizard()
+w.State.CurrentStep = model.StepNetwork
+w.State.Config.Network = model.NetworkConfig{
+Mode:    model.NetworkStatic,
+Address: "192.168.1.10/24",
+Gateway: "192.168.1.1",
+DNS:     []string{"8.8.8.8"},
+// Interface intentionally empty
+}
+
+err := w.ValidateCurrentStep()
+if err == nil {
+t.Fatal("expected error for static network with empty interface")
+}
+if !strings.Contains(err.Error(), "interface") {
+t.Errorf("error should mention interface, got: %v", err)
 }
 }
