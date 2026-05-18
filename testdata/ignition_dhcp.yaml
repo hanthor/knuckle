@@ -11,7 +11,7 @@ storage:
       contents:
         inline: |
           REBOOT_STRATEGY=reboot
-          GROUP=
+          GROUP=stable
     - path: /etc/ssh/sshd_config.d/99-knuckle-hardening.conf
       mode: 0600
       contents:

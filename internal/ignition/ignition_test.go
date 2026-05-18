@@ -227,6 +227,58 @@ func TestFilterSelectedEmpty(t *testing.T) {
 	}
 }
 
+func TestGenerateButaneTimezoneAndStatic(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "combo-node",
+		Timezone: "America/New_York",
+		Network: model.NetworkConfig{
+			Mode:      model.NetworkStatic,
+			Interface: "eth0",
+			Address:   "10.0.0.50/24",
+			Gateway:   "10.0.0.1",
+			DNS:       []string{"1.1.1.1"},
+		},
+		Users: []model.UserConfig{
+			{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA test"}},
+		},
+	}
+
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The static network file MUST appear under storage.files, not storage.links.
+	// Find positions: "files:" must come before "10-static.network",
+	// and "10-static.network" must come before "links:".
+	filesIdx := strings.Index(output, "files:")
+	staticIdx := strings.Index(output, "10-static.network")
+	linksIdx := strings.Index(output, "links:")
+
+	if filesIdx < 0 {
+		t.Fatal("missing files: section")
+	}
+	if staticIdx < 0 {
+		t.Fatal("missing 10-static.network entry")
+	}
+	if linksIdx < 0 {
+		t.Fatal("missing links: section")
+	}
+
+	if staticIdx < filesIdx {
+		t.Errorf("static network (pos %d) appears before files: (pos %d)", staticIdx, filesIdx)
+	}
+	if staticIdx > linksIdx {
+		t.Errorf("static network (pos %d) appears after links: (pos %d) — should be under files:", staticIdx, linksIdx)
+	}
+
+	// Also verify timezone link is present
+	if !strings.Contains(output, "/usr/share/zoneinfo/America/New_York") {
+		t.Error("missing timezone zoneinfo target")
+	}
+}
+
 func TestGenerateButaneTimezoneLink(t *testing.T) {
 	g := NewGenerator()
 	cfg := &model.InstallConfig{
@@ -320,4 +372,25 @@ func TestGenerateButanePasswordAuthNo(t *testing.T) {
 	if strings.Contains(output, "PasswordAuthentication yes") {
 		t.Error("should not have PasswordAuthentication yes without password")
 	}
+}
+
+func TestGenerateButaneDefaultChannel(t *testing.T) {
+g := NewGenerator()
+cfg := &model.InstallConfig{
+Hostname: "default-channel-node",
+Channel:  "", // empty — should default to "stable"
+Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+Users: []model.UserConfig{
+{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA test"}},
+},
+}
+
+output, err := g.GenerateButane(cfg)
+if err != nil {
+t.Fatalf("unexpected error: %v", err)
+}
+
+if !strings.Contains(output, "GROUP=stable") {
+t.Errorf("expected GROUP=stable when channel is empty, got output:\n%s", output)
+}
 }

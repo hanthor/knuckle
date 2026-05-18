@@ -43,6 +43,11 @@ func (g *Generator) GenerateButane(cfg *model.InstallConfig) (string, error) {
 		return "", fmt.Errorf("parsing template: %w", err)
 	}
 
+	channel := cfg.Channel
+	if channel == "" {
+		channel = "stable"
+	}
+
 	rebootStrategy := cfg.UpdateStrategy.RebootStrategy
 	if rebootStrategy == "" {
 		rebootStrategy = "reboot"
@@ -63,7 +68,7 @@ func (g *Generator) GenerateButane(cfg *model.InstallConfig) (string, error) {
 		SSHKeys:        cfg.SSHKeys,
 		Network:        cfg.Network,
 		Sysexts:        filterSelected(cfg.Sysexts),
-		Channel:        cfg.Channel,
+		Channel:        channel,
 		RebootStrategy: rebootStrategy,
 		HasPassword:    hasPassword,
 	}
@@ -119,12 +124,6 @@ storage:
           PasswordAuthentication {{if .HasPassword}}yes{{else}}no{{end}}
           PermitRootLogin no
           PubkeyAuthentication yes
-{{- if .Timezone}}
-  links:
-    - path: /etc/localtime
-      target: "/usr/share/zoneinfo/{{.Timezone}}"
-      overwrite: true
-{{- end}}
 {{- if isStatic .Network}}
     - path: /etc/systemd/network/10-static.network
       mode: 0644
@@ -139,6 +138,12 @@ storage:
 {{- range .Network.DNS}}
           DNS={{.}}
 {{- end}}
+{{- end}}
+{{- if .Timezone}}
+  links:
+    - path: /etc/localtime
+      target: "/usr/share/zoneinfo/{{.Timezone}}"
+      overwrite: true
 {{- end}}
 {{- range .Sysexts}}
     - path: /etc/extensions/{{.Name}}.raw
