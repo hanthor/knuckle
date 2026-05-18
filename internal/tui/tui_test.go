@@ -251,3 +251,33 @@ func TestHashPasswordError(t *testing.T) {
 		t.Error("expected error for password > 72 bytes")
 	}
 }
+
+func TestQuitRequiresDoublePress(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepStorage // non-field step
+	w.State.Disks = []model.DiskInfo{{DevPath: "/dev/sda", SizeHuman: "50 GB"}}
+	m := New(w)
+
+	// First q should show confirmation
+	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	tuiModel := newModel.(*Model)
+	if tuiModel.quitting {
+		t.Error("should not quit on first q press")
+	}
+	if cmd != nil {
+		t.Error("should not return quit cmd on first press")
+	}
+	if !tuiModel.confirmQuit {
+		t.Error("should show quit confirmation")
+	}
+
+	// Second q should actually quit
+	newModel, cmd = tuiModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	tuiModel = newModel.(*Model)
+	if !tuiModel.quitting {
+		t.Error("should quit on second q press")
+	}
+	if cmd == nil {
+		t.Error("should return quit cmd")
+	}
+}
