@@ -23,6 +23,12 @@ errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).MarginTop(1)
 )
 
+// installProgressMsg carries a progress line from the install goroutine.
+type installProgressMsg string
+
+// installDoneMsg signals install completion (success or failure).
+type installDoneMsg struct{ err error }
+
 // Model is the top-level Bubble Tea model
 type Model struct {
 Wizard       *wizard.Wizard
@@ -32,6 +38,7 @@ err          error
 quitting     bool
 confirmQuit  bool
 showButane   bool
+installing   bool
 cursor       int
 fields       []field
 fieldIdx     int
@@ -61,6 +68,17 @@ case tea.WindowSizeMsg:
 m.width = msg.Width
 m.height = msg.Height
 return m, nil
+case installProgressMsg:
+m.Wizard.State.ProgressMessages = append(m.Wizard.State.ProgressMessages, string(msg))
+return m, nil
+case installDoneMsg:
+m.installing = false
+if msg.err != nil {
+m.err = msg.err
+return m, nil
+}
+m.Wizard.State.CurrentStep = model.StepDone
+return m, tea.Quit
 }
 return m, nil
 }
@@ -201,12 +219,11 @@ if m.cursor >= 0 && m.cursor < len(strategies) {
 m.Wizard.State.Config.UpdateStrategy.RebootStrategy = strategies[m.cursor]
 }
 case model.StepInstall:
-ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-defer cancel()
-if err := m.Wizard.Execute(ctx); err != nil {
-m.err = err
-return m, nil
+if !m.installing {
+m.installing = true
+return m, m.startInstall()
 }
+return m, nil
 }
 
 if err := m.Wizard.Next(); err != nil {
@@ -222,6 +239,17 @@ if m.Wizard.State.CurrentStep == model.StepDone {
 return m, tea.Quit
 }
 return m, nil
+}
+
+func (m *Model) startInstall() tea.Cmd {
+return func() tea.Msg {
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+defer cancel()
+if err := m.Wizard.Execute(ctx); err != nil {
+return installDoneMsg{err: err}
+}
+return installDoneMsg{err: nil}
+}
 }
 
 func (m *Model) applyFields() {

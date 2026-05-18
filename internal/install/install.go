@@ -115,7 +115,7 @@ func buildInstallArgs(cfg *model.InstallConfig, ignitionJSON string) []string {
 // WriteIgnitionFile writes the Ignition JSON to a temp file for flatcar-install.
 // In dry-run mode this is a no-op handled by the runner.
 func (i *FlatcarInstaller) WriteIgnitionFile(ctx context.Context, ignitionJSON string) error {
-	_, err := i.Runner.RunWithInput(ctx, ignitionJSON, "tee", "/tmp/knuckle-ignition.json")
+	_, err := i.Runner.RunWithInput(ctx, ignitionJSON, "sh", "-c", "umask 077 && cat > /tmp/knuckle-ignition.json")
 	return err
 }
 

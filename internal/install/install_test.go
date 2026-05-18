@@ -60,6 +60,30 @@ func TestInstallWithGeneratedConfig(t *testing.T) {
 		t.Errorf("butane args = %v, want [--strict]", butaneCall.Args)
 	}
 
+	// Verify ignition file was written securely (umask 077, not world-readable tee)
+	var writeCall *runner.SpyCall
+	for i := range spy.Calls {
+		if spy.Calls[i].Name == "sh" {
+			writeCall = &spy.Calls[i]
+			break
+		}
+	}
+	if writeCall == nil {
+		t.Fatal("secure write (sh -c umask) was not called")
+	}
+	wantWriteArgs := []string{"-c", "umask 077 && cat > /tmp/knuckle-ignition.json"}
+	if len(writeCall.Args) != len(wantWriteArgs) {
+		t.Fatalf("write args = %v, want %v", writeCall.Args, wantWriteArgs)
+	}
+	for i, arg := range wantWriteArgs {
+		if writeCall.Args[i] != arg {
+			t.Errorf("write arg[%d] = %q, want %q", i, writeCall.Args[i], arg)
+		}
+	}
+	if writeCall.Input == "" {
+		t.Error("write call had no stdin input (ignition JSON)")
+	}
+
 	// Verify flatcar-install was called with correct args
 	var installCall *runner.SpyCall
 	for i := range spy.Calls {
