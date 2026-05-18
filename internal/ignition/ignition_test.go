@@ -394,3 +394,48 @@ if !strings.Contains(output, "GROUP=stable") {
 t.Errorf("expected GROUP=stable when channel is empty, got output:\n%s", output)
 }
 }
+
+func TestGenerateButaneTimezoneAndSysexts(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "sysext-tz-node",
+		Timezone: "Europe/Berlin",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users: []model.UserConfig{
+			{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA test"}},
+		},
+		Sysexts: []model.SysextEntry{
+			{Name: "docker", Version: "24.0.7", URL: "https://example.com/docker.raw", Selected: true},
+		},
+	}
+
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Sysext file must be under storage.files, NOT storage.links
+	filesIdx := strings.Index(output, "files:")
+	linksIdx := strings.Index(output, "links:")
+	sysextIdx := strings.Index(output, "/etc/extensions/docker.raw")
+
+	if filesIdx < 0 {
+		t.Fatal("expected files: section")
+	}
+	if linksIdx < 0 {
+		t.Fatal("expected links: section for timezone")
+	}
+	if sysextIdx < 0 {
+		t.Fatal("expected sysext file entry")
+	}
+
+	// Sysext must appear BEFORE links section (i.e., under files)
+	if sysextIdx > linksIdx {
+		t.Errorf("BUG: sysext file appears AFTER links: section — would be parsed as a link.\nfiles: at %d, links: at %d, sysext at %d", filesIdx, linksIdx, sysextIdx)
+	}
+
+	// Also verify timezone link is correct
+	if !strings.Contains(output, "/usr/share/zoneinfo/Europe/Berlin") {
+		t.Error("missing timezone link target")
+	}
+}

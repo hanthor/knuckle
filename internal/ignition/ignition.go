@@ -139,16 +139,16 @@ storage:
           DNS={{.}}
 {{- end}}
 {{- end}}
+{{- range .Sysexts}}
+    - path: /etc/extensions/{{.Name}}.raw
+      contents:
+        source: "{{.URL}}"
+{{- end}}
 {{- if .Timezone}}
   links:
     - path: /etc/localtime
       target: "/usr/share/zoneinfo/{{.Timezone}}"
       overwrite: true
-{{- end}}
-{{- range .Sysexts}}
-    - path: /etc/extensions/{{.Name}}.raw
-      contents:
-        source: "{{.URL}}"
 {{- end}}
 systemd:
   units:
