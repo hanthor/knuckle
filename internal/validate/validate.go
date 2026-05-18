@@ -149,7 +149,7 @@ func InterfaceName(s string) error {
 	if len(s) > 15 {
 		return fmt.Errorf("interface name too long (max 15 characters)")
 	}
-	matched, _ := regexp.MatchString(`^[a-zA-Z0-9._-]+$`, s)
+	matched, _ := regexp.MatchString(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`, s)
 	if !matched {
 		return fmt.Errorf("invalid interface name %q: must contain only alphanumeric, dots, hyphens, or underscores", s)
 	}
