@@ -4,16 +4,19 @@ storage:
   files:
     - path: /etc/hostname
       mode: 0644
+      overwrite: true
       contents:
         inline: "flatcar-static"
     - path: /etc/flatcar/update.conf
       mode: 0644
+      overwrite: true
       contents:
         inline: |
           REBOOT_STRATEGY=reboot
           GROUP=stable
     - path: /etc/ssh/sshd_config.d/99-knuckle-hardening.conf
       mode: 0600
+      overwrite: true
       contents:
         inline: |
           PasswordAuthentication no

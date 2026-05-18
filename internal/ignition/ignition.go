@@ -109,16 +109,19 @@ storage:
   files:
     - path: /etc/hostname
       mode: 0644
+      overwrite: true
       contents:
         inline: "{{.Hostname | yamlEscape}}"
     - path: /etc/flatcar/update.conf
       mode: 0644
+      overwrite: true
       contents:
         inline: |
           REBOOT_STRATEGY={{.RebootStrategy}}
           GROUP={{.Channel}}
     - path: /etc/ssh/sshd_config.d/99-knuckle-hardening.conf
       mode: 0600
+      overwrite: true
       contents:
         inline: |
           PasswordAuthentication {{if .HasPassword}}yes{{else}}no{{end}}
