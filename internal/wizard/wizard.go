@@ -140,8 +140,8 @@ return nil
 func (w *Wizard) validateNetwork() error {
 cfg := w.State.Config.Network
 if cfg.Mode == model.NetworkStatic {
-if cfg.Interface == "" {
-return fmt.Errorf("network interface is required for static configuration")
+if err := validate.InterfaceName(cfg.Interface); err != nil {
+return fmt.Errorf("network interface: %w", err)
 }
 if err := validate.CIDR(cfg.Address); err != nil {
 return fmt.Errorf("network address: %w", err)

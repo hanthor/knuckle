@@ -138,3 +138,20 @@ func NonEmpty(field, value string) error {
 	}
 	return nil
 }
+
+// InterfaceName validates a Linux network interface name.
+// Must be 1-15 characters, alphanumeric plus dots, hyphens, underscores.
+// No path traversal or special characters.
+func InterfaceName(s string) error {
+	if s == "" {
+		return fmt.Errorf("interface name cannot be empty")
+	}
+	if len(s) > 15 {
+		return fmt.Errorf("interface name too long (max 15 characters)")
+	}
+	matched, _ := regexp.MatchString(`^[a-zA-Z0-9._-]+$`, s)
+	if !matched {
+		return fmt.Errorf("invalid interface name %q: must contain only alphanumeric, dots, hyphens, or underscores", s)
+	}
+	return nil
+}
