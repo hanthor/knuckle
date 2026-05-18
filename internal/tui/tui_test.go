@@ -234,3 +234,20 @@ if !strings.Contains(view, "2 eligible disk(s) found") {
 t.Error("expected disk detail text")
 }
 }
+
+func TestHashPasswordError(t *testing.T) {
+	// Test normal case
+	hash, err := hashPassword("short")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hash == "" {
+		t.Error("expected non-empty hash")
+	}
+	// Test too-long password
+	longPw := strings.Repeat("a", 73)
+	_, err = hashPassword(longPw)
+	if err == nil {
+		t.Error("expected error for password > 72 bytes")
+	}
+}

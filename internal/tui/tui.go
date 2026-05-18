@@ -285,7 +285,12 @@ cfg.Users[0].Username = f.value
 }
 case "password":
 if f.value != "" && len(cfg.Users) > 0 {
-cfg.Users[0].PasswordHash = hashPassword(f.value)
+hash, err := hashPassword(f.value)
+if err != nil {
+m.err = err
+return
+}
+cfg.Users[0].PasswordHash = hash
 }
 case "github_user":
 if f.value != "" {
@@ -740,12 +745,15 @@ return err
 }
 
 // hashPassword generates a bcrypt hash suitable for Ignition passwd field.
-func hashPassword(plain string) string {
+func hashPassword(plain string) (string, error) {
+if len(plain) > 72 {
+return "", fmt.Errorf("password too long (max 72 bytes for bcrypt)")
+}
 hash, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
 if err != nil {
-return ""
+return "", fmt.Errorf("hashing password: %w", err)
 }
-return string(hash)
+return string(hash), nil
 }
 
 // splitSSHKeys splits SSH keys by semicolons and trims whitespace.
