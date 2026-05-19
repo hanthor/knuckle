@@ -135,3 +135,93 @@ func TestFetchChannelInfo_CancelledContext(t *testing.T) {
 		t.Fatal("expected error from cancelled context, got nil")
 	}
 }
+
+const mockSBOMJSON = `{
+  "spdxVersion": "SPDX-2.3",
+  "packages": [
+    {"name": "sys-kernel/coreos-kernel", "versionInfo": "6.12.87"},
+    {"name": "sys-apps/systemd", "versionInfo": "257.9"},
+    {"name": "sys-apps/ignition", "versionInfo": "2.24.0-r1"},
+    {"name": "dev-db/etcd", "versionInfo": "3.5.18"},
+    {"name": "app-misc/unrelated", "versionInfo": "1.0.0"}
+  ]
+}`
+
+func TestParseSBOMJSON(t *testing.T) {
+	info := &ChannelInfo{}
+	parseSBOMJSON(mockSBOMJSON, info)
+
+	if info.Kernel != "6.12.87" {
+		t.Errorf("kernel: got %q, want %q", info.Kernel, "6.12.87")
+	}
+	if info.Systemd != "257.9" {
+		t.Errorf("systemd: got %q, want %q", info.Systemd, "257.9")
+	}
+	if info.Ignition != "2.24.0" {
+		t.Errorf("ignition: got %q, want %q (should strip -rN)", info.Ignition, "2.24.0")
+	}
+	if info.Etcd != "3.5.18" {
+		t.Errorf("etcd: got %q, want %q", info.Etcd, "3.5.18")
+	}
+}
+
+func TestSBOMPreferredOverPackageList(t *testing.T) {
+	// When SBOM JSON is available, it should be used instead of text package list.
+	// The SBOM has different (newer) versions than the text file to prove priority.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/version.txt", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(mockVersionTxt))
+	})
+	mux.HandleFunc("/flatcar_production_image_packages.txt", func(w http.ResponseWriter, r *http.Request) {
+		// Text file has OLDER versions — should NOT be used when SBOM available
+		_, _ = w.Write([]byte("sys-kernel/coreos-kernel-5.0.0::coreos-overlay\nsys-apps/systemd-200.0::portage-stable\n"))
+	})
+	mux.HandleFunc("/flatcar_production_image_sbom.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(mockSBOMJSON))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	info, err := fetchChannelInfoFromURLs(context.Background(), "stable",
+		srv.URL+"/version.txt",
+		srv.URL+"/flatcar_production_image_packages.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// SBOM version should win over text file
+	if info.Kernel != "6.12.87" {
+		t.Errorf("SBOM should be preferred: kernel got %q, want %q", info.Kernel, "6.12.87")
+	}
+	if info.Systemd != "257.9" {
+		t.Errorf("SBOM should be preferred: systemd got %q, want %q", info.Systemd, "257.9")
+	}
+}
+
+func TestFallbackToPackageListWhenNoSBOM(t *testing.T) {
+	// When SBOM returns 404, fall back to text package list
+	mux := http.NewServeMux()
+	mux.HandleFunc("/version.txt", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(mockVersionTxt))
+	})
+	mux.HandleFunc("/flatcar_production_image_packages.txt", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(mockPackageList))
+	})
+	mux.HandleFunc("/flatcar_production_image_sbom.json", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	info, err := fetchChannelInfoFromURLs(context.Background(), "stable",
+		srv.URL+"/version.txt",
+		srv.URL+"/flatcar_production_image_packages.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get versions from text file fallback
+	if info.Kernel != "6.12.81" {
+		t.Errorf("fallback failed: kernel got %q, want %q", info.Kernel, "6.12.81")
+	}
+}

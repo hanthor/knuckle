@@ -2,6 +2,7 @@ package bakery
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,21 +36,34 @@ func FetchChannelInfo(ctx context.Context, channel string) (*ChannelInfo, error)
 func fetchChannelInfoFromURLs(ctx context.Context, channel, versionURL, pkgURL string) (*ChannelInfo, error) {
 	info := &ChannelInfo{Channel: channel}
 
-	// Fetch version.txt
+	// Fetch version.txt for FLATCAR_VERSION (lightweight, always available)
 	versionBody, err := httpGet(ctx, versionURL)
 	if err != nil {
 		return nil, fmt.Errorf("fetching version.txt for %s: %w", channel, err)
 	}
 	parseVersionTxt(versionBody, info)
 
-	// Fetch base image package list (kernel, systemd, ignition, etcd)
-	pkgBody, err := httpGet(ctx, pkgURL)
-	if err != nil {
-		return nil, fmt.Errorf("fetching package list for %s: %w", channel, err)
+	// Fetch SBOM JSON (authoritative structured source for package versions)
+	sbomURL := strings.Replace(pkgURL, "flatcar_production_image_packages.txt", "flatcar_production_image_sbom.json", 1)
+	sbomUsed := false
+	if sbomURL != pkgURL { // only try SBOM if URL was actually different
+		if sbomBody, err := httpGet(ctx, sbomURL); err == nil {
+			parseSBOMJSON(sbomBody, info)
+			if info.Kernel != "" {
+				sbomUsed = true
+			}
+		}
 	}
-	parsePackageList(pkgBody, info)
+	if !sbomUsed {
+		// Fallback to text package list
+		pkgBody, err := httpGet(ctx, pkgURL)
+		if err != nil {
+			return nil, fmt.Errorf("fetching package list for %s: %w", channel, err)
+		}
+		parsePackageList(pkgBody, info)
+	}
 
-	// Fetch docker sysext package list
+	// Fetch docker sysext package list (no JSON SBOM available for sysexts)
 	dockerPkgURL := strings.Replace(pkgURL, "flatcar_production_image_packages.txt", "rootfs-included-sysexts/docker-flatcar_packages.txt", 1)
 	if body, err := httpGet(ctx, dockerPkgURL); err == nil {
 		parseSysextPackageList(body, info)
@@ -154,7 +168,44 @@ func parseVersionTxt(body string, info *ChannelInfo) {
 	}
 }
 
+// spdxDocument represents the relevant parts of an SPDX SBOM JSON.
+type spdxDocument struct {
+	Packages []spdxPackage `json:"packages"`
+}
+
+type spdxPackage struct {
+	Name        string `json:"name"`
+	VersionInfo string `json:"versionInfo"`
+}
+
+// parseSBOMJSON extracts package versions from the Flatcar SPDX SBOM JSON.
+// This is the authoritative structured source — preferred over text package lists.
+func parseSBOMJSON(body string, info *ChannelInfo) {
+	var doc spdxDocument
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		return // silently fall back to text parsing
+	}
+
+	for _, pkg := range doc.Packages {
+		switch pkg.Name {
+		case "sys-kernel/coreos-kernel":
+			info.Kernel = pkg.VersionInfo
+		case "sys-apps/systemd":
+			info.Systemd = pkg.VersionInfo
+		case "sys-apps/ignition":
+			info.Ignition = pkg.VersionInfo
+			// Strip -rN revision suffix
+			if idx := strings.Index(info.Ignition, "-r"); idx >= 0 {
+				info.Ignition = info.Ignition[:idx]
+			}
+		case "dev-db/etcd":
+			info.Etcd = pkg.VersionInfo
+		}
+	}
+}
+
 // parsePackageList extracts kernel, systemd, ignition, and etcd versions from the base package list.
+// Fallback when SBOM JSON is unavailable.
 func parsePackageList(body string, info *ChannelInfo) {
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)
