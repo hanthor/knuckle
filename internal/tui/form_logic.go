@@ -168,11 +168,8 @@ func (m *Model) viewWithForm() string {
 	b.WriteString(m.viewWelcomeHeader())
 
 	// Step indicator
-	b.WriteString(stepStyle.Render(fmt.Sprintf("Step %d/%d: %s",
-		int(m.Wizard.State.CurrentStep)+1,
-		9,
-		m.Wizard.State.CurrentStep.String())))
-	b.WriteString("\n\n")
+	b.WriteString(m.renderProgressBar())
+	b.WriteString("\n")
 
 	// Form
 	if m.activeForm != nil {

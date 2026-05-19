@@ -503,11 +503,8 @@ func (m *Model) View() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("🔧 Knuckle — Flatcar Container Linux Installer"))
 	b.WriteString("\n")
-	b.WriteString(stepStyle.Render(fmt.Sprintf("Step %d/%d: %s",
-		int(m.Wizard.State.CurrentStep)+1,
-		wizard.StepCount(),
-		m.Wizard.State.CurrentStep.String())))
-	b.WriteString("\n\n")
+	b.WriteString(m.renderProgressBar())
+	b.WriteString("\n")
 
 	switch m.Wizard.State.CurrentStep {
 	case model.StepStorage:
