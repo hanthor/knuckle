@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -233,6 +234,21 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.confirmQuit = true
 		m.err = fmt.Errorf("press Ctrl+C again to quit, or any other key to continue")
+		return m, nil
+	case "r":
+		// Reboot on Done step
+		if m.Wizard.State.CurrentStep == model.StepDone {
+			m.quitting = true
+			return m, tea.Sequence(
+				tea.ExecProcess(exec.Command("systemctl", "reboot"), nil),
+				tea.Quit,
+			)
+		}
+		// On field steps, type the character
+		if len(m.fields) > 0 {
+			m.fields[m.fieldIdx].value += "r"
+			return m, nil
+		}
 		return m, nil
 	case "q":
 		if len(m.fields) > 0 {
@@ -932,9 +948,8 @@ func (m *Model) viewDone() string {
 ✅ Installation Complete!
 
 Flatcar Container Linux has been installed successfully.
-Remove the installation media and reboot your system.
 
-Press q to exit.
+Press r to reboot now, or q to exit.
 `
 }
 
