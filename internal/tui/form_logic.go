@@ -19,6 +19,9 @@ func (m *Model) initForm() {
 		m.activeForm = m.buildWelcomeForm()
 	case model.StepNetwork:
 		m.dnsInput = strings.Join(m.Wizard.State.Config.Network.DNS, ",")
+		if m.networkModeInput == "" {
+			m.networkModeInput = "dhcp"
+		}
 		m.activeForm = m.buildNetworkForm()
 	case model.StepUser:
 		if len(m.Wizard.State.Config.Users) > 0 {
@@ -69,7 +72,7 @@ func (m *Model) onFormComplete() tea.Cmd {
 		if m.dnsInput != "" {
 			cfg.Network.DNS = strings.Split(m.dnsInput, ",")
 		}
-		if cfg.Network.Address != "" || cfg.Network.Gateway != "" {
+		if m.networkModeInput == "static" {
 			cfg.Network.Mode = model.NetworkStatic
 		} else {
 			cfg.Network.Mode = model.NetworkDHCP

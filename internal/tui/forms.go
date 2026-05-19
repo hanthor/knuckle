@@ -54,59 +54,77 @@ func (m *Model) buildWelcomeForm() *huh.Form {
 
 	return huh.NewForm(
 		huh.NewGroup(fields...),
-	).WithTheme(huh.ThemeDracula()).WithShowHelp(true)
+	).WithTheme(huh.ThemeDracula()).WithShowHelp(true).WithWidth(80)
 }
 
 // buildNetworkForm creates the huh form for the Network step.
 func (m *Model) buildNetworkForm() *huh.Form {
-	// Show detected interfaces in the description
-	ifaceDesc := "Network interface for static config"
-	if len(m.Wizard.State.Interfaces) > 0 {
-		var names []string
-		for _, iface := range m.Wizard.State.Interfaces {
-			names = append(names, iface.Name)
-		}
-		ifaceDesc = fmt.Sprintf("Detected: %s", strings.Join(names, ", "))
+	// Build interface options from detected interfaces
+	ifaceOptions := []huh.Option[string]{
+		huh.NewOption("Auto (DHCP on all interfaces)", ""),
+	}
+	for _, iface := range m.Wizard.State.Interfaces {
+		label := fmt.Sprintf("%s — %s (%s)", iface.Name, iface.MAC, iface.State)
+		ifaceOptions = append(ifaceOptions, huh.NewOption(label, iface.Name))
+	}
+
+	modeOptions := []huh.Option[string]{
+		huh.NewOption("DHCP — automatic configuration (recommended)", "dhcp"),
+		huh.NewOption("Static — manual IP configuration", "static"),
+	}
+
+	fields := []huh.Field{
+		huh.NewNote().
+			Title("Network Configuration").
+			Description("How should this machine connect to the network?"),
+		huh.NewSelect[string]().
+			Title("Network Mode").
+			Options(modeOptions...).
+			Value(&m.networkModeInput),
+	}
+
+	// Only show static config fields if static mode is likely
+	// (huh doesn't support conditional fields, so we always show them
+	// but the Note explains they're only used for static)
+	staticFields := []huh.Field{
+		huh.NewSelect[string]().
+			Title("Interface").
+			Description("Which network interface to configure").
+			Options(ifaceOptions...).
+			Value(&m.Wizard.State.Config.Network.Interface),
+		huh.NewInput().
+			Title("IP Address").
+			Description("With subnet mask, e.g. 192.168.1.100/24").
+			Placeholder("192.168.1.100/24").
+			Value(&m.Wizard.State.Config.Network.Address).
+			Validate(func(s string) error {
+				if s == "" {
+					return nil
+				}
+				return validate.CIDR(s)
+			}),
+		huh.NewInput().
+			Title("Gateway").
+			Placeholder("192.168.1.1").
+			Value(&m.Wizard.State.Config.Network.Gateway).
+			Validate(func(s string) error {
+				if s == "" {
+					return nil
+				}
+				return validate.IPAddress(s)
+			}),
+		huh.NewInput().
+			Title("DNS Servers").
+			Description("Comma-separated, e.g. 1.1.1.1,8.8.8.8").
+			Placeholder("1.1.1.1").
+			Value(&m.dnsInput),
 	}
 
 	return huh.NewForm(
-		huh.NewGroup(
-			huh.NewNote().
-				Title("Network Configuration").
-				Description("Configure networking for this machine.\nLeave all fields blank for DHCP (recommended for most setups).\n\nCommon static configurations:\n  • Home server: 192.168.1.100/24, gateway 192.168.1.1, DNS 1.1.1.1\n  • Office/VLAN: 10.0.1.50/24, gateway 10.0.1.1, DNS 10.0.1.1\n  • Lab network: 172.16.0.10/16, gateway 172.16.0.1, DNS 8.8.8.8"),
-			huh.NewInput().
-				Title("Interface").
-				Description(ifaceDesc).
-				Placeholder("eth0").
-				Value(&m.Wizard.State.Config.Network.Interface),
-			huh.NewInput().
-				Title("IP Address (CIDR)").
-				Description("Include subnet mask, e.g. /24 = 255.255.255.0").
-				Placeholder("192.168.1.100/24").
-				Value(&m.Wizard.State.Config.Network.Address).
-				Validate(func(s string) error {
-					if s == "" {
-						return nil
-					}
-					return validate.CIDR(s)
-				}),
-			huh.NewInput().
-				Title("Gateway").
-				Placeholder("192.168.1.1").
-				Value(&m.Wizard.State.Config.Network.Gateway).
-				Validate(func(s string) error {
-					if s == "" {
-						return nil
-					}
-					return validate.IPAddress(s)
-				}),
-			huh.NewInput().
-				Title("DNS Servers").
-				Description("Comma-separated. Common: 1.1.1.1 (Cloudflare), 8.8.8.8 (Google)").
-				Placeholder("1.1.1.1,8.8.8.8").
-				Value(&m.dnsInput),
-		),
-	).WithTheme(huh.ThemeDracula()).WithShowHelp(true)
+		huh.NewGroup(fields...),
+		huh.NewGroup(staticFields...).Title("Static IP Configuration").
+			Description("Only needed if you chose Static mode above"),
+	).WithTheme(huh.ThemeDracula()).WithShowHelp(true).WithWidth(80)
 }
 
 // buildUserForm creates the huh form for the User step.
@@ -165,7 +183,7 @@ func (m *Model) buildUserForm() *huh.Form {
 				Description("Or paste key directly (separate multiple with ;)").
 				Value(&m.sshKeyInput),
 		),
-	).WithTheme(huh.ThemeDracula()).WithShowHelp(true)
+	).WithTheme(huh.ThemeDracula()).WithShowHelp(true).WithWidth(80)
 }
 
 // buildReviewForm creates the huh confirm for the Review step.
@@ -179,7 +197,7 @@ func (m *Model) buildReviewForm() *huh.Form {
 				Negative("Go back").
 				Value(&m.Wizard.State.Confirmed),
 		),
-	).WithTheme(huh.ThemeDracula()).WithShowHelp(true)
+	).WithTheme(huh.ThemeDracula()).WithShowHelp(true).WithWidth(80)
 }
 
 func (m *Model) reviewSummary() string {

@@ -53,13 +53,14 @@ type Model struct {
 	fieldIdx    int
 
 	// huh form state
-	activeForm      *huh.Form
-	dnsInput        string
-	usernameInput   string
-	passwordInput   string
-	githubUserInput string
-	sshKeyInput     string
-	showAdvanced    bool
+	activeForm       *huh.Form
+	dnsInput         string
+	networkModeInput string
+	usernameInput    string
+	passwordInput    string
+	githubUserInput  string
+	sshKeyInput      string
+	showAdvanced     bool
 }
 
 type field struct {
@@ -112,6 +113,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Forward to active form so it knows its rendering width
+		if m.activeForm != nil {
+			form, cmd := m.activeForm.Update(msg)
+			if f, ok := form.(*huh.Form); ok {
+				m.activeForm = f
+			}
+			return m, cmd
+		}
 		return m, nil
 	case installProgressMsg:
 		m.Wizard.State.ProgressMessages = append(m.Wizard.State.ProgressMessages, string(msg))
