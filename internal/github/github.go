@@ -2,6 +2,7 @@
 package github
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,17 +10,40 @@ import (
 	"time"
 )
 
+// KeyFetcher fetches SSH public keys for a user.
+type KeyFetcher interface {
+	FetchKeys(ctx context.Context, username string) ([]string, error)
+}
+
+// Client fetches SSH keys from GitHub's public API.
+type Client struct {
+	BaseURL string
+	HTTP    *http.Client
+}
+
+// NewClient creates a GitHub client with a 10s timeout.
+func NewClient() *Client {
+	return &Client{
+		BaseURL: "https://github.com",
+		HTTP:    &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
 // FetchKeys retrieves SSH public keys for a GitHub username.
-// Returns the keys as a slice of strings (one per line from https://github.com/<user>.keys).
-func FetchKeys(username string) ([]string, error) {
+// Returns the keys as a slice of strings (one per line from <BaseURL>/<user>.keys).
+func (c *Client) FetchKeys(ctx context.Context, username string) ([]string, error) {
 	if username == "" {
 		return nil, fmt.Errorf("empty GitHub username")
 	}
 
-	url := fmt.Sprintf("https://github.com/%s.keys", username)
-	client := &http.Client{Timeout: 10 * time.Second}
+	url := fmt.Sprintf("%s/%s.keys", c.BaseURL, username)
 
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch keys: %w", err)
 	}
@@ -51,4 +75,25 @@ func FetchKeys(username string) ([]string, error) {
 	}
 
 	return keys, nil
+}
+
+var defaultClient = NewClient()
+
+// FetchKeys fetches SSH keys using the default client (backward compat).
+func FetchKeys(username string) ([]string, error) {
+	return defaultClient.FetchKeys(context.Background(), username)
+}
+
+// MockClient is a test double for KeyFetcher.
+type MockClient struct {
+	Keys map[string][]string
+	Err  error
+}
+
+// FetchKeys returns pre-configured keys or error for testing.
+func (m *MockClient) FetchKeys(_ context.Context, username string) ([]string, error) {
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return m.Keys[username], nil
 }
