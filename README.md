@@ -1,6 +1,6 @@
 # Knuckle
 
-A modern, interactive TUI installer for [Flatcar Container Linux](https://www.flatcar.org/), designed for bare-metal deployments.
+A modern, interactive TUI "installer" for [Flatcar Container Linux](https://www.flatcar.org/), designed for bare-metal deployments. Not a real installer because making one would be dumb. It's a form that makes a valid ignition file and passes it to the installer. We're just making users not have to use ignition, with an ubuntu-server style install UX. 
 
 ## Why
 
