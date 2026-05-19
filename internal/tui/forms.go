@@ -294,22 +294,28 @@ func (m *Model) renderZenChrome() string {
 	// Info line: version + system dots
 	cfg := &m.Wizard.State.Config
 
+	// Channel as label, versions as tight key:value with │ separators
 	var verInfo string
 	if len(m.Wizard.State.Channels) > 0 {
 		for _, ch := range m.Wizard.State.Channels {
 			if ch.Channel == cfg.Channel {
-				verInfo = fmt.Sprintf("%s %s \u00b7 kernel %s \u00b7 systemd %s",
-					ch.Channel, ch.Version, ch.Kernel, ch.Systemd)
+				verInfo = fmt.Sprintf("%s", accentColor.Render(ch.Channel)) +
+					dimColor.Render(" \u2502 ") +
+					infoColor.Render("v"+ch.Version) +
+					dimColor.Render(" \u2502 ") +
+					infoColor.Render("linux "+ch.Kernel) +
+					dimColor.Render(" \u2502 ") +
+					infoColor.Render("systemd "+ch.Systemd)
 				break
 			}
 		}
 	}
 	if verInfo == "" {
-		verInfo = cfg.Channel
+		verInfo = accentColor.Render(cfg.Channel)
 	}
 
 	b.WriteString("  ")
-	b.WriteString(infoColor.Render(verInfo))
+	b.WriteString(verInfo)
 
 	if len(m.Wizard.State.SystemChecks) > 0 {
 		b.WriteString(dimColor.Render("  \u2502  "))
