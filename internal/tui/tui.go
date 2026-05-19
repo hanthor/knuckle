@@ -30,6 +30,12 @@ type installProgressMsg string
 // installDoneMsg signals install completion (success or failure).
 type installDoneMsg struct{ err error }
 
+// fetchKeysMsg carries the result of an async GitHub key fetch.
+type fetchKeysMsg struct {
+	keys []string
+	err  error
+}
+
 // Model is the top-level Bubble Tea model
 type Model struct {
 	Wizard      *wizard.Wizard
@@ -40,6 +46,7 @@ type Model struct {
 	confirmQuit bool
 	showButane  bool
 	installing  bool
+	fetching    bool
 	cursor      int
 	fields      []field
 	fieldIdx    int
@@ -80,6 +87,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.Wizard.State.CurrentStep = model.StepDone
 		return m, tea.Quit
+	case fetchKeysMsg:
+		m.fetching = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		cfg := &m.Wizard.State.Config
+		cfg.SSHKeys = msg.keys
+		if len(cfg.Users) > 0 {
+			cfg.Users[0].SSHKeys = msg.keys
+		}
+		// Now advance to next step
+		if err := m.Wizard.Next(); err != nil {
+			m.err = err
+			return m, nil
+		}
+		m.err = nil
+		m.cursor = 0
+		m.initStepFields()
+		return m, nil
 	}
 	return m, nil
 }
@@ -218,6 +245,18 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 		if m.cursor >= 0 && m.cursor < len(strategies) {
 			m.Wizard.State.Config.UpdateStrategy.RebootStrategy = strategies[m.cursor]
 		}
+	case model.StepUser:
+		// Trigger async GitHub key fetch if username is provided
+		for _, f := range m.fields {
+			if f.key == "github_user" && f.value != "" && !m.fetching {
+				m.fetching = true
+				username := f.value
+				return m, func() tea.Msg {
+					keys, err := github.FetchKeys(username)
+					return fetchKeysMsg{keys: keys, err: err}
+				}
+			}
+		}
 	case model.StepInstall:
 		if !m.installing {
 			m.installing = true
@@ -325,18 +364,8 @@ func (m *Model) applyFields() {
 					cfg.Users[0].PasswordHash = hash
 				}
 			case "github_user":
-				if f.value != "" {
-					keys, err := github.FetchKeys(f.value)
-					if err != nil {
-						m.err = err
-						return
-					}
-					cfg.SSHKeys = keys
-					// Also attach to user
-					if len(cfg.Users) > 0 {
-						cfg.Users[0].SSHKeys = keys
-					}
-				}
+				// GitHub key fetch is handled async in handleEnter()
+				// Nothing to do here — fetch triggers on step advance
 			case "ssh_key":
 				if f.value != "" {
 					// Support multiple keys separated by semicolons
@@ -559,7 +588,9 @@ func (m *Model) viewUser() string {
 		}
 		fmt.Fprintf(&b, "%s%s: %s\n", cursor, f.label, displayVal)
 	}
-	if len(m.Wizard.State.Config.SSHKeys) > 0 {
+	if m.fetching {
+		b.WriteString("\n  ⠋ Fetching SSH keys from GitHub...\n")
+	} else if len(m.Wizard.State.Config.SSHKeys) > 0 {
 		fmt.Fprintf(&b, "\n  ✓ %d SSH key(s) configured\n", len(m.Wizard.State.Config.SSHKeys))
 	}
 	return b.String()
