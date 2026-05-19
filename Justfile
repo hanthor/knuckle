@@ -138,6 +138,19 @@ clean:
 e2e:
     ./scripts/e2e-test.sh
 
+# Quick headless dry-run test (no VM needed)
+headless-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Building..."
+    go build -o bin/knuckle ./cmd/knuckle
+    cat > /tmp/knuckle-test-config.json <<'EOF'
+    {"channel":"stable","hostname":"test-node","timezone":"UTC","network":{"mode":"dhcp"},"users":[{"username":"core","ssh_keys":["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test"]}],"disk":"/dev/vdb","update_strategy":"reboot","reboot":false}
+    EOF
+    echo "Running headless dry-run..."
+    bin/knuckle --config /tmp/knuckle-test-config.json --headless --dry-run
+    echo "PASS"
+
 # Boot the installed target disk (after e2e or manual install)
 boot-target:
     #!/usr/bin/env bash

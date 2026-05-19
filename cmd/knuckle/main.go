@@ -1,18 +1,20 @@
 package main
 
 import (
-"context"
-"flag"
-"fmt"
-"log/slog"
-"os"
+	"context"
+	"flag"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
 
-"github.com/castrojo/knuckle/internal/bakery"
-"github.com/castrojo/knuckle/internal/install"
-"github.com/castrojo/knuckle/internal/probe"
-"github.com/castrojo/knuckle/internal/runner"
-"github.com/castrojo/knuckle/internal/tui"
-"github.com/castrojo/knuckle/internal/wizard"
+	"github.com/castrojo/knuckle/internal/bakery"
+	"github.com/castrojo/knuckle/internal/headless"
+	"github.com/castrojo/knuckle/internal/install"
+	"github.com/castrojo/knuckle/internal/probe"
+	"github.com/castrojo/knuckle/internal/runner"
+	"github.com/castrojo/knuckle/internal/tui"
+	"github.com/castrojo/knuckle/internal/wizard"
 )
 
 var (
@@ -27,10 +29,16 @@ channel string
 showVer bool
 )
 
+var (
+	configFile string
+	headlessMode bool
+)
 flag.BoolVar(&dryRun, "dry-run", false, "simulate installation without writing to disk")
 flag.StringVar(&logFile, "log-file", "/tmp/knuckle.log", "path to log file")
 flag.StringVar(&channel, "channel", "stable", "Flatcar release channel (stable, beta, alpha, edge)")
 flag.BoolVar(&showVer, "version", false, "print version and exit")
+flag.StringVar(&configFile, "config", "", "path to JSON config file for headless install")
+flag.BoolVar(&headlessMode, "headless", false, "run without TUI (requires --config)")
 var flatcarVersion string
 flag.StringVar(&flatcarVersion, "flatcar-version", "", "pin to specific Flatcar version (e.g. 3510.2.8)")
 flag.Parse()
@@ -40,11 +48,21 @@ fmt.Printf("knuckle %s\n", version)
 os.Exit(0)
 }
 
+// Handle headless mode early
+if headlessMode || configFile != "" {
+	if configFile == "" {
+		fmt.Fprintf(os.Stderr, "Error: --headless requires --config <file>\n")
+		os.Exit(1)
+	}
+	runHeadless(configFile, dryRun, logFile)
+	return
+}
+
 // Validate channel flag
 validChannels := map[string]bool{"stable": true, "beta": true, "alpha": true, "edge": true}
 if !validChannels[channel] {
-fmt.Fprintf(os.Stderr, "Error: invalid channel %q (must be stable, beta, alpha, or edge)\n", channel)
-os.Exit(1)
+	fmt.Fprintf(os.Stderr, "Error: invalid channel %q (must be stable, beta, alpha, or edge)\n", channel)
+	os.Exit(1)
 }
 
 // Set up logging to file (never stdout — Bubble Tea owns stdout)
@@ -105,5 +123,59 @@ fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 os.Exit(1)
 }
 
-logger.Info("knuckle finished")
+	logger.Info("knuckle finished")
 }
+
+// runHeadless loads a JSON config and runs the install without TUI.
+func runHeadless(configPath string, dryRun bool, logFile string) {
+	// Set up logging
+	logWriter, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening log file: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() { _ = logWriter.Close() }()
+
+	logger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	// Load config
+	cfg, err := headless.LoadConfig(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Override dry-run from CLI flag
+	if dryRun {
+		cfg.DryRun = true
+	}
+
+	// Set up runner
+	var cmdRunner runner.Runner
+	if cfg.DryRun {
+		cmdRunner = runner.NewDryRunner(logger)
+	} else {
+		cmdRunner = runner.NewRealRunner(logger)
+	}
+
+	installer := install.NewFlatcarInstaller(cmdRunner, logger)
+
+	// Run headless install
+	ctx := context.Background()
+	if err := headless.Run(ctx, cfg, installer, logger); err != nil {
+		fmt.Fprintf(os.Stderr, "\n❌ %v\n", err)
+		os.Exit(1)
+	}
+
+	// Handle reboot
+	if cfg.Reboot && !cfg.DryRun {
+		cmd := exec.Command("systemctl", "reboot")
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: reboot failed: %v\n", err)
+			os.Exit(1)
+		}
+	}
+}
+

@@ -1,0 +1,318 @@
+package headless
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"log/slog"
+
+	"github.com/castrojo/knuckle/internal/model"
+)
+
+func TestLoadConfig(t *testing.T) {
+	cfg := Config{
+		Channel:        "stable",
+		Hostname:       "test-node",
+		Timezone:       "UTC",
+		Network:        NetworkConfig{Mode: "dhcp"},
+		Users:          []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:           "/dev/vdb",
+		UpdateStrategy: "reboot",
+		Reboot:         true,
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if loaded.Channel != "stable" {
+		t.Errorf("got channel=%q, want stable", loaded.Channel)
+	}
+	if loaded.Hostname != "test-node" {
+		t.Errorf("got hostname=%q, want test-node", loaded.Hostname)
+	}
+	if loaded.Disk != "/dev/vdb" {
+		t.Errorf("got disk=%q, want /dev/vdb", loaded.Disk)
+	}
+	if len(loaded.Users) != 1 {
+		t.Fatalf("got %d users, want 1", len(loaded.Users))
+	}
+	if loaded.Users[0].Username != "core" {
+		t.Errorf("got username=%q, want core", loaded.Users[0].Username)
+	}
+}
+
+func TestLoadConfig_FileNotFound(t *testing.T) {
+	_, err := LoadConfig("/nonexistent/path.json")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestLoadConfig_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	os.WriteFile(path, []byte("not json {{{"), 0644)
+
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestValidate_ValidDHCP(t *testing.T) {
+	cfg := &Config{
+		Channel:        "stable",
+		Hostname:       "node01",
+		Network:        NetworkConfig{Mode: "dhcp"},
+		Users:          []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:           "/dev/vdb",
+		UpdateStrategy: "reboot",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ValidStatic(t *testing.T) {
+	cfg := &Config{
+		Channel:  "beta",
+		Hostname: "node02",
+		Network: NetworkConfig{
+			Mode:    "static",
+			Address: "192.168.1.100/24",
+			Gateway: "192.168.1.1",
+			DNS:     []string{"1.1.1.1"},
+		},
+		Users:          []UserConfig{{Username: "admin", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:           "/dev/sda",
+		UpdateStrategy: "off",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_MissingDisk(t *testing.T) {
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "node01",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users:    []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:     "",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for missing disk")
+	}
+}
+
+func TestValidate_MissingUsers(t *testing.T) {
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "node01",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users:    nil,
+		Disk:     "/dev/vdb",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for missing users")
+	}
+}
+
+func TestValidate_UserNoAuth(t *testing.T) {
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "node01",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users:    []UserConfig{{Username: "core"}}, // no keys, no password, no github
+		Disk:     "/dev/vdb",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for user without auth method")
+	}
+}
+
+func TestValidate_InvalidChannel(t *testing.T) {
+	cfg := &Config{
+		Channel:  "nightly",
+		Hostname: "node01",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users:    []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:     "/dev/vdb",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for invalid channel")
+	}
+}
+
+func TestValidate_InvalidHostname(t *testing.T) {
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "INVALID HOST NAME!",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users:    []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:     "/dev/vdb",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for invalid hostname")
+	}
+}
+
+func TestValidate_InvalidStaticNetwork(t *testing.T) {
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "node01",
+		Network: NetworkConfig{
+			Mode:    "static",
+			Address: "not-a-cidr",
+		},
+		Users: []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:  "/dev/vdb",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for invalid CIDR")
+	}
+}
+
+func TestValidate_InvalidUpdateStrategy(t *testing.T) {
+	cfg := &Config{
+		Channel:        "stable",
+		Hostname:       "node01",
+		Network:        NetworkConfig{Mode: "dhcp"},
+		Users:          []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:           "/dev/vdb",
+		UpdateStrategy: "invalid-strategy",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for invalid update strategy")
+	}
+}
+
+func TestToInstallConfig(t *testing.T) {
+	cfg := &Config{
+		Channel:        "beta",
+		Hostname:       "test-host",
+		Timezone:       "America/New_York",
+		Network:        NetworkConfig{Mode: "dhcp"},
+		Users:          []UserConfig{{Username: "admin", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}, Groups: []string{"wheel"}}},
+		Disk:           "/dev/nvme0n1",
+		UpdateStrategy: "off",
+	}
+
+	installCfg, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("ToInstallConfig: %v", err)
+	}
+
+	if installCfg.Channel != "beta" {
+		t.Errorf("channel: got %q, want beta", installCfg.Channel)
+	}
+	if installCfg.Hostname != "test-host" {
+		t.Errorf("hostname: got %q, want test-host", installCfg.Hostname)
+	}
+	if installCfg.Disk.DevPath != "/dev/nvme0n1" {
+		t.Errorf("disk: got %q, want /dev/nvme0n1", installCfg.Disk.DevPath)
+	}
+	if installCfg.Network.Mode != model.NetworkDHCP {
+		t.Errorf("network mode: got %v, want DHCP", installCfg.Network.Mode)
+	}
+	if len(installCfg.Users) != 1 {
+		t.Fatalf("users: got %d, want 1", len(installCfg.Users))
+	}
+	if installCfg.Users[0].Groups[0] != "wheel" {
+		t.Errorf("groups: got %v, want [wheel]", installCfg.Users[0].Groups)
+	}
+	if installCfg.UpdateStrategy.RebootStrategy != "off" {
+		t.Errorf("update strategy: got %q, want off", installCfg.UpdateStrategy.RebootStrategy)
+	}
+}
+
+func TestToInstallConfig_Defaults(t *testing.T) {
+	cfg := &Config{
+		Users: []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Disk:  "/dev/vdb",
+	}
+
+	installCfg, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("ToInstallConfig: %v", err)
+	}
+
+	if installCfg.Channel != "stable" {
+		t.Errorf("default channel: got %q, want stable", installCfg.Channel)
+	}
+	if installCfg.Timezone != "UTC" {
+		t.Errorf("default timezone: got %q, want UTC", installCfg.Timezone)
+	}
+	if installCfg.UpdateStrategy.RebootStrategy != "reboot" {
+		t.Errorf("default strategy: got %q, want reboot", installCfg.UpdateStrategy.RebootStrategy)
+	}
+}
+
+// mockInstaller for testing Run()
+type mockInstaller struct {
+	installErr error
+	called     bool
+}
+
+func (m *mockInstaller) Install(ctx context.Context, cfg *model.InstallConfig, progress func(string)) error {
+	m.called = true
+	progress("mock step 1")
+	progress("mock step 2")
+	return m.installErr
+}
+
+func TestRun_Success(t *testing.T) {
+	cfg := &Config{
+		Channel:        "stable",
+		Hostname:       "test-node",
+		Network:        NetworkConfig{Mode: "dhcp"},
+		Users:          []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:           "/dev/vdb",
+		UpdateStrategy: "reboot",
+		DryRun:         true,
+	}
+
+	installer := &mockInstaller{}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	err := Run(context.Background(), cfg, installer, logger)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !installer.called {
+		t.Error("installer.Install was not called")
+	}
+}
+
+func TestRun_ValidationFailure(t *testing.T) {
+	cfg := &Config{
+		Channel: "invalid-channel",
+		Disk:    "/dev/vdb",
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+	}
+
+	installer := &mockInstaller{}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	err := Run(context.Background(), cfg, installer, logger)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if installer.called {
+		t.Error("installer should not be called on validation failure")
+	}
+}
