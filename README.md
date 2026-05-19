@@ -2,6 +2,8 @@
 
 A modern, interactive TUI "installer" for [Flatcar Container Linux](https://www.flatcar.org/), designed for bare-metal deployments. Not a real installer because making one would be dumb. It's a form that makes a valid ignition file and passes it to the installer. We're just making users not have to use ignition, with an ubuntu-server style install UX. 
 
+This is also basically [Azure Container Linux (Home Edition)](https://opensource.microsoft.com/blog/2026/05/18/from-open-source-to-agentic-systems-microsoft-at-open-source-summit-north-america-2026/). 
+
 ## Why
 
 Flatcar is typically provisioned in cloud environments via Ignition configs. Bare-metal installations lack a polished setup experience. Knuckle bridges this gap with an intuitive terminal wizard that generates Ignition configurations and executes the installation.
