@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/castrojo/knuckle/internal/model"
+	"github.com/castrojo/knuckle/internal/validate"
 )
 
 // buildWelcomeForm creates the huh form for the Welcome step.
@@ -22,8 +23,12 @@ func (m *Model) buildWelcomeForm() *huh.Form {
 
 	return huh.NewForm(
 		huh.NewGroup(
+			huh.NewNote().
+				Title("Welcome to Knuckle").
+				Description("This wizard will install Flatcar Container Linux on your system.\nIt will configure networking, users, and write the OS to disk."),
 			huh.NewSelect[string]().
 				Title("Release Channel").
+				Description("Choose the Flatcar release channel for this installation").
 				Options(channels...).
 				Value(&m.Wizard.State.Config.Channel),
 			huh.NewInput().
@@ -44,19 +49,34 @@ func (m *Model) buildWelcomeForm() *huh.Form {
 func (m *Model) buildNetworkForm() *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
+			huh.NewNote().
+				Title("Network Configuration").
+				Description("Configure networking for this machine.\nLeave all fields blank for DHCP (recommended for most setups)."),
 			huh.NewInput().
 				Title("Interface").
-				Description("Network interface for static config (leave blank for DHCP)").
+				Description("Network interface for static config").
 				Placeholder("eth0").
 				Value(&m.Wizard.State.Config.Network.Interface),
 			huh.NewInput().
 				Title("IP Address (CIDR)").
 				Placeholder("192.168.1.100/24").
-				Value(&m.Wizard.State.Config.Network.Address),
+				Value(&m.Wizard.State.Config.Network.Address).
+				Validate(func(s string) error {
+					if s == "" {
+						return nil
+					}
+					return validate.CIDR(s)
+				}),
 			huh.NewInput().
 				Title("Gateway").
 				Placeholder("192.168.1.1").
-				Value(&m.Wizard.State.Config.Network.Gateway),
+				Value(&m.Wizard.State.Config.Network.Gateway).
+				Validate(func(s string) error {
+					if s == "" {
+						return nil
+					}
+					return validate.IPAddress(s)
+				}),
 			huh.NewInput().
 				Title("DNS Servers").
 				Description("Comma-separated").
@@ -71,26 +91,47 @@ func (m *Model) buildNetworkForm() *huh.Form {
 func (m *Model) buildUserForm() *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
+			huh.NewNote().
+				Title("System Identity").
+				Description("Configure the hostname and primary user account."),
 			huh.NewInput().
 				Title("Hostname").
 				Placeholder("flatcar-node01").
-				Value(&m.Wizard.State.Config.Hostname),
+				Value(&m.Wizard.State.Config.Hostname).
+				Validate(func(s string) error {
+					if s == "" {
+						return nil
+					}
+					return validate.Hostname(s)
+				}),
 			huh.NewInput().
 				Title("Timezone").
 				Placeholder("UTC").
 				Description("e.g. America/New_York, Europe/Berlin").
-				Value(&m.Wizard.State.Config.Timezone),
+				Value(&m.Wizard.State.Config.Timezone).
+				Validate(func(s string) error {
+					return validate.Timezone(s)
+				}),
 			huh.NewInput().
 				Title("Username").
 				Description("Primary user account").
-				Value(&m.usernameInput),
+				Value(&m.usernameInput).
+				Validate(func(s string) error {
+					if s == "" {
+						return nil
+					}
+					return validate.Username(s)
+				}),
 			huh.NewInput().
 				Title("Password").
 				Description("Optional — leave blank for key-only auth").
 				EchoMode(huh.EchoModePassword).
 				Value(&m.passwordInput),
-		).Title("System Identity"),
+		),
 		huh.NewGroup(
+			huh.NewNote().
+				Title("Authentication").
+				Description("Set up SSH access. Enter a GitHub username to fetch your\npublic keys automatically, or paste a key directly."),
 			huh.NewInput().
 				Title("GitHub Username").
 				Description("Fetches your SSH public keys automatically").
@@ -100,7 +141,7 @@ func (m *Model) buildUserForm() *huh.Form {
 				Title("SSH Public Key").
 				Description("Or paste key directly (separate multiple with ;)").
 				Value(&m.sshKeyInput),
-		).Title("Authentication"),
+		),
 	).WithTheme(huh.ThemeDracula()).WithShowHelp(true)
 }
 
