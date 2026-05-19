@@ -140,6 +140,7 @@ func (m *Model) onFormComplete() tea.Cmd {
 		// Advance to install
 		if err := m.Wizard.Next(); err != nil {
 			m.err = err
+			m.Wizard.State.Confirmed = false // reset so form can be re-answered
 			m.initForm()
 			return m.activeForm.Init()
 		}
