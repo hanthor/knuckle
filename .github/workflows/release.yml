@@ -32,7 +32,7 @@ jobs:
           set -euo pipefail
           CHANNEL=stable
           BASE_URL="https://stable.release.flatcar-linux.net/amd64-usr/current"
-          BUILD_DIR=".iso-build"
+          BUILD_DIR="$PWD/.iso-build"
           mkdir -p "$BUILD_DIR"
 
           echo "Downloading Flatcar PXE artifacts..."
@@ -45,27 +45,27 @@ jobs:
           cp knuckle "$OVERLAY/opt/knuckle"
           chmod 755 "$OVERLAY/opt/knuckle"
 
-          cat > "$OVERLAY/etc/systemd/system/knuckle-installer.service" <<'EOF'
-          [Unit]
-          Description=Knuckle Flatcar Installer
-          After=multi-user.target network-online.target
-          Wants=network-online.target
-          ConditionPathExists=/opt/knuckle
+          cat > "$OVERLAY/etc/systemd/system/knuckle-installer.service" <<SVCEOF
+[Unit]
+Description=Knuckle Flatcar Installer
+After=multi-user.target network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/knuckle
 
-          [Service]
-          Type=idle
-          ExecStart=/opt/knuckle --log-file /tmp/knuckle.log
-          StandardInput=tty
-          StandardOutput=tty
-          TTYPath=/dev/tty1
-          TTYReset=yes
-          TTYVHangup=yes
-          Restart=on-failure
-          RestartSec=3
+[Service]
+Type=idle
+ExecStart=/opt/knuckle --log-file /tmp/knuckle.log
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Restart=on-failure
+RestartSec=3
 
-          [Install]
-          WantedBy=multi-user.target
-          EOF
+[Install]
+WantedBy=multi-user.target
+SVCEOF
 
           ln -sf /etc/systemd/system/knuckle-installer.service \
               "$OVERLAY/etc/systemd/system/multi-user.target.wants/knuckle-installer.service"
@@ -76,28 +76,27 @@ jobs:
           cat "$BUILD_DIR/initrd.cpio.gz" "$BUILD_DIR/overlay.cpio.gz" > "$BUILD_DIR/combined-initrd.img"
 
           echo "Building GRUB EFI..."
-          GRUB_CFG="$BUILD_DIR/grub.cfg"
-          cat > "$GRUB_CFG" <<'GRUBCFG'
-          set timeout=3
-          set default=0
+          cat > "$BUILD_DIR/grub.cfg" <<GRUBEOF
+set timeout=3
+set default=0
 
-          menuentry "Knuckle - Install Flatcar Container Linux" {
-              linux /vmlinuz flatcar.autologin=tty1 console=tty0 console=ttyS0
-              initrd /initrd.img
-          }
+menuentry "Knuckle - Install Flatcar Container Linux" {
+    linux /vmlinuz flatcar.autologin=tty1 console=tty0 console=ttyS0
+    initrd /initrd.img
+}
 
-          menuentry "Knuckle - Install (serial console)" {
-              linux /vmlinuz flatcar.autologin=ttyS0 console=ttyS0
-              initrd /initrd.img
-          }
-          GRUBCFG
+menuentry "Knuckle - Install (serial console)" {
+    linux /vmlinuz flatcar.autologin=ttyS0 console=ttyS0
+    initrd /initrd.img
+}
+GRUBEOF
 
           grub-mkstandalone \
               --format=x86_64-efi \
               --output="$BUILD_DIR/BOOTX64.EFI" \
               --locales="" \
               --fonts="" \
-              "boot/grub/grub.cfg=$GRUB_CFG"
+              "boot/grub/grub.cfg=$BUILD_DIR/grub.cfg"
 
           echo "Building ESP..."
           INITRD_SIZE=$(stat -c%s "$BUILD_DIR/combined-initrd.img")
