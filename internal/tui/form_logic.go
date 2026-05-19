@@ -112,6 +112,8 @@ func (m *Model) onFormComplete() tea.Cmd {
 		if m.githubUserInput != "" {
 			m.fetching = true
 			username := m.githubUserInput
+			// Strip @ prefix if present
+			username = strings.TrimPrefix(username, "@")
 			return func() tea.Msg {
 				keys, err := github.FetchKeys(username)
 				return fetchKeysMsg{keys: keys, err: err}

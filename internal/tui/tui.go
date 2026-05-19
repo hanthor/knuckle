@@ -370,7 +370,12 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) startInstall() tea.Cmd {
-	return func() tea.Msg {
+	return func() (msg tea.Msg) {
+		defer func() {
+			if r := recover(); r != nil {
+				msg = installDoneMsg{err: fmt.Errorf("install panicked: %v", r)}
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		if err := m.Wizard.Execute(ctx); err != nil {

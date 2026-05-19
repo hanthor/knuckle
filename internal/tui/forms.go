@@ -176,7 +176,7 @@ func (m *Model) buildUserForm() *huh.Form {
 			huh.NewInput().
 				Title("GitHub Username").
 				Description("Fetches your SSH public keys automatically").
-				Placeholder("castrojo").
+				Placeholder("username or @username").
 				Value(&m.githubUserInput),
 			huh.NewInput().
 				Title("SSH Public Key").
