@@ -19,6 +19,8 @@ func TestFullWizardNavigation(t *testing.T) {
 	}
 	w.State.Config.SSHKeys = []string{"ssh-ed25519 AAAA test"}
 	w.State.Config.Hostname = "test-node"
+	w.State.Config.Channel = "stable"
+	w.State.Config.Disk = model.DiskInfo{DevPath: "/dev/vda"}
 
 	m := New(w)
 
@@ -30,7 +32,6 @@ func TestFullWizardNavigation(t *testing.T) {
 		model.StepUser,
 		model.StepSysext,
 		model.StepUpdate,
-		model.StepReview,
 	}
 
 	for i, expectedStep := range steps {
@@ -45,7 +46,7 @@ func TestFullWizardNavigation(t *testing.T) {
 		m = newModel.(*Model)
 	}
 
-	// Should be at Review
+	// Should be at Review after advancing from Update
 	if m.Wizard.State.CurrentStep != model.StepReview {
 		t.Errorf("expected StepReview, got %v", m.Wizard.State.CurrentStep)
 	}
