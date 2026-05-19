@@ -113,10 +113,7 @@ return nil // sysext selection is optional
 case model.StepUpdate:
 return nil // update strategy selection is optional (defaults to "reboot")
 case model.StepReview:
-if !w.State.Confirmed {
-return fmt.Errorf("type YES to confirm installation")
-}
-return w.validateConsistency()
+return validate.CheckConsistency(&w.State.Config)
 case model.StepInstall:
 return nil // install step validates on execute
 default:
@@ -198,36 +195,10 @@ return err
 return nil
 }
 
-// validateConsistency checks for contradictions in the final config
+// validateConsistency checks for contradictions in the final config.
+// Delegates to validate.CheckConsistency.
 func (w *Wizard) validateConsistency() error {
-cfg := w.State.Config
-
-// Must have a disk selected
-if cfg.Disk.DevPath == "" {
-return fmt.Errorf("no disk selected")
-}
-
-// Must have authentication (SSH key or password)
-hasSSH := len(cfg.SSHKeys) > 0
-hasPassword := false
-for _, u := range cfg.Users {
-if len(u.SSHKeys) > 0 {
-hasSSH = true
-}
-if u.PasswordHash != "" {
-hasPassword = true
-}
-}
-if !hasSSH && !hasPassword && cfg.IgnitionURL == "" {
-return fmt.Errorf("no authentication configured: add SSH keys or a password")
-}
-
-// Warn if static network but no gateway
-if cfg.Network.Mode == model.NetworkStatic && cfg.Network.Gateway == "" {
-return fmt.Errorf("static network requires a gateway")
-}
-
-return nil
+return validate.CheckConsistency(&w.State.Config)
 }
 
 // ProbeHardware discovers disks and network interfaces

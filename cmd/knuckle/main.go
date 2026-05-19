@@ -31,6 +31,8 @@ flag.BoolVar(&dryRun, "dry-run", false, "simulate installation without writing t
 flag.StringVar(&logFile, "log-file", "/tmp/knuckle.log", "path to log file")
 flag.StringVar(&channel, "channel", "stable", "Flatcar release channel (stable, beta, alpha, edge)")
 flag.BoolVar(&showVer, "version", false, "print version and exit")
+var flatcarVersion string
+flag.StringVar(&flatcarVersion, "flatcar-version", "", "pin to specific Flatcar version (e.g. 3510.2.8)")
 flag.Parse()
 
 if showVer {
@@ -77,6 +79,7 @@ installer := install.NewFlatcarInstaller(cmdRunner, logger)
 w := wizard.New(prober, bakeryClient, installer)
 w.State.Config.Channel = channel
 w.State.Config.DryRun = dryRun
+w.State.Config.Version = flatcarVersion
 
 // Probe hardware before starting TUI
 ctx := context.Background()

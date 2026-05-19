@@ -226,6 +226,16 @@ func TestBuildInstallArgs(t *testing.T) {
 			want:         []string{"-d", "/dev/vda", "-C", "beta"},
 		},
 		{
+			name: "version pinning",
+			cfg: &model.InstallConfig{
+				Channel: "stable",
+				Disk:    model.DiskInfo{DevPath: "/dev/sda"},
+				Version: "3510.2.8",
+			},
+			ignitionJSON: `{"ignition":{}}`,
+			want:         []string{"-d", "/dev/sda", "-C", "stable", "-V", "3510.2.8", "-i", "/tmp/knuckle-ignition.json"},
+		},
+		{
 			name: "prefers by-id path over devpath",
 			cfg: &model.InstallConfig{
 				Channel: "stable",

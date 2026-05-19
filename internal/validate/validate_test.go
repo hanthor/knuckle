@@ -3,6 +3,8 @@ package validate
 import (
 	"strings"
 	"testing"
+
+	"github.com/castrojo/knuckle/internal/model"
 )
 
 func TestHostname(t *testing.T) {
@@ -297,6 +299,126 @@ func TestGroupName(t *testing.T) {
 			err := GroupName(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GroupName(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCheckConsistency(t *testing.T) {
+	validConfig := func() *model.InstallConfig {
+		return &model.InstallConfig{
+			Channel: "stable",
+			SSHKeys: []string{"ssh-ed25519 AAAA test@host"},
+			Disk: model.DiskSelection{
+				DevPath: "/dev/sda",
+			},
+			Network: model.NetworkConfig{
+				Mode: model.NetworkDHCP,
+			},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		modify  func(cfg *model.InstallConfig)
+		wantErr string
+	}{
+		{
+			name:   "valid config passes",
+			modify: func(cfg *model.InstallConfig) {},
+		},
+		{
+			name: "no disk selected",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.Disk.DevPath = ""
+			},
+			wantErr: "no disk selected",
+		},
+		{
+			name: "no channel selected",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.Channel = ""
+			},
+			wantErr: "no channel selected",
+		},
+		{
+			name: "no auth method",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.SSHKeys = nil
+			},
+			wantErr: "at least one authentication method required",
+		},
+		{
+			name: "user SSH key counts as auth",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.SSHKeys = nil
+				cfg.Users = []model.UserConfig{
+					{Name: "core", SSHKeys: []string{"ssh-ed25519 AAAA"}},
+				}
+			},
+		},
+		{
+			name: "user password counts as auth",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.SSHKeys = nil
+				cfg.Users = []model.UserConfig{
+					{Name: "core", PasswordHash: "$6$rounds=..."},
+				}
+			},
+		},
+		{
+			name: "static network missing gateway",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.Network.Mode = model.NetworkStatic
+				cfg.Network.Interface = "eth0"
+				cfg.Network.Address = "10.0.0.5/24"
+			},
+			wantErr: "static network requires a gateway",
+		},
+		{
+			name: "static network missing interface",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.Network.Mode = model.NetworkStatic
+				cfg.Network.Gateway = "10.0.0.1"
+				cfg.Network.Address = "10.0.0.5/24"
+			},
+			wantErr: "static network requires an interface name",
+		},
+		{
+			name: "static network missing address",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.Network.Mode = model.NetworkStatic
+				cfg.Network.Gateway = "10.0.0.1"
+				cfg.Network.Interface = "eth0"
+			},
+			wantErr: "static network requires an IP address",
+		},
+		{
+			name: "valid static network",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.Network.Mode = model.NetworkStatic
+				cfg.Network.Gateway = "10.0.0.1"
+				cfg.Network.Interface = "eth0"
+				cfg.Network.Address = "10.0.0.5/24"
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			tt.modify(cfg)
+			err := CheckConsistency(cfg)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("CheckConsistency() unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("CheckConsistency() expected error containing %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("CheckConsistency() error = %q, want substring %q", err.Error(), tt.wantErr)
 			}
 		})
 	}

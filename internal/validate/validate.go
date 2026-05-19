@@ -6,6 +6,8 @@ import (
 	"net"
 	"regexp"
 	"strings"
+
+	"github.com/castrojo/knuckle/internal/model"
 )
 
 // Hostname validates a Linux hostname (RFC 1123).
@@ -160,6 +162,45 @@ func GroupName(name string) error {
 	matched, _ := regexp.MatchString(`^[a-z_][a-z0-9_-]*$`, name)
 	if !matched {
 		return fmt.Errorf("invalid group name %q: must match [a-z_][a-z0-9_-]*", name)
+	}
+	return nil
+}
+
+// CheckConsistency validates the overall config for conflicting settings.
+func CheckConsistency(cfg *model.InstallConfig) error {
+	// Static network requires gateway and interface
+	if cfg.Network.Mode == model.NetworkStatic {
+		if cfg.Network.Gateway == "" {
+			return fmt.Errorf("static network requires a gateway")
+		}
+		if cfg.Network.Interface == "" {
+			return fmt.Errorf("static network requires an interface name")
+		}
+		if cfg.Network.Address == "" {
+			return fmt.Errorf("static network requires an IP address")
+		}
+	}
+	// Must have at least one auth method
+	hasSSH := len(cfg.SSHKeys) > 0
+	hasPassword := false
+	for _, u := range cfg.Users {
+		if len(u.SSHKeys) > 0 {
+			hasSSH = true
+		}
+		if u.PasswordHash != "" {
+			hasPassword = true
+		}
+	}
+	if !hasSSH && !hasPassword {
+		return fmt.Errorf("at least one authentication method required (SSH key or password)")
+	}
+	// Disk must be selected
+	if cfg.Disk.DevPath == "" {
+		return fmt.Errorf("no disk selected")
+	}
+	// Channel must be valid
+	if cfg.Channel == "" {
+		return fmt.Errorf("no channel selected")
 	}
 	return nil
 }
