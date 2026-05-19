@@ -305,6 +305,12 @@ w.State.ProgressMessages = append(w.State.ProgressMessages, msg)
 return w.Installer.Install(ctx, &w.State.Config, progress)
 }
 
+
+// ExecuteWithProgress runs the install with an external progress callback.
+// Used by the TUI to send progress messages via tea.Cmd channel.
+func (w *Wizard) ExecuteWithProgress(ctx context.Context, progress func(string)) error {
+	return w.Installer.Install(ctx, &w.State.Config, progress)
+}
 // IsFirstStep returns true if on the first step
 func (w *Wizard) IsFirstStep() bool {
 return w.State.CurrentStep == model.StepWelcome

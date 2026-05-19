@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -61,6 +63,11 @@ type Model struct {
 	githubUserInput  string
 	sshKeyInput      string
 	showAdvanced     bool
+
+	// Install progress
+	spinner    spinner.Model
+	progress   progress.Model
+	progressCh chan string
 }
 
 type field struct {
@@ -72,7 +79,20 @@ type field struct {
 
 // New creates a new TUI model
 func New(w *wizard.Wizard) *Model {
-	m := &Model{Wizard: w}
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	p := progress.New(
+		progress.WithGradient("#50fa7b", "#ff79c6"),
+		progress.WithWidth(40),
+	)
+
+	m := &Model{
+		Wizard:   w,
+		spinner:  s,
+		progress: p,
+	}
 	if len(w.State.Config.Users) > 0 {
 		m.usernameInput = w.State.Config.Users[0].Username
 	}
@@ -82,10 +102,12 @@ func New(w *wizard.Wizard) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
+	var cmds []tea.Cmd
 	if m.activeForm != nil {
-		return m.activeForm.Init()
+		cmds = append(cmds, m.activeForm.Init())
 	}
-	return nil
+	cmds = append(cmds, m.spinner.Tick)
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -124,7 +146,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case installProgressMsg:
 		m.Wizard.State.ProgressMessages = append(m.Wizard.State.ProgressMessages, string(msg))
-		return m, nil
+		// Update progress bar + continue listening
+		total := 5.0
+		done := float64(len(m.Wizard.State.ProgressMessages))
+		pCmd := m.progress.SetPercent(done / total)
+		return m, tea.Batch(pCmd, m.waitForProgress())
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+	case progress.FrameMsg:
+		newProgress, cmd := m.progress.Update(msg)
+		m.progress = newProgress.(progress.Model)
+		return m, cmd
 	case installDoneMsg:
 		m.installing = false
 		if msg.err != nil {
@@ -371,18 +405,47 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) startInstall() tea.Cmd {
-	return func() (msg tea.Msg) {
+	// Use a channel to send progress messages back to the TUI
+	progressCh := make(chan string, 10)
+	m.progressCh = progressCh
+
+	// Start install in background
+	go func() {
+		defer close(progressCh)
 		defer func() {
 			if r := recover(); r != nil {
-				msg = installDoneMsg{err: fmt.Errorf("install panicked: %v", r)}
+				progressCh <- fmt.Sprintf("PANIC: %v", r)
 			}
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		if err := m.Wizard.Execute(ctx); err != nil {
-			return installDoneMsg{err: err}
+
+		progress := func(msg string) {
+			progressCh <- msg
 		}
-		return installDoneMsg{err: nil}
+		if err := m.Wizard.ExecuteWithProgress(ctx, progress); err != nil {
+			progressCh <- "ERROR:" + err.Error()
+		}
+	}()
+
+	// Return a Cmd that polls the channel
+	return m.waitForProgress()
+}
+
+func (m *Model) waitForProgress() tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-m.progressCh
+		if !ok {
+			// Channel closed — install finished
+			return installDoneMsg{err: nil}
+		}
+		if strings.HasPrefix(msg, "ERROR:") {
+			return installDoneMsg{err: fmt.Errorf("%s", strings.TrimPrefix(msg, "ERROR:"))}
+		}
+		if strings.HasPrefix(msg, "PANIC:") {
+			return installDoneMsg{err: fmt.Errorf("%s", msg)}
+		}
+		return installProgressMsg(msg)
 	}
 }
 
@@ -845,35 +908,21 @@ func (m *Model) viewInstall() string {
 	var b strings.Builder
 	b.WriteString("Installing Flatcar Container Linux...\n\n")
 
-	total := 5 // approximate total steps
-	done := len(m.Wizard.State.ProgressMessages)
-	if done > total {
-		total = done
-	}
+	// Animated progress bar
+	b.WriteString("  " + m.progress.View() + "\n\n")
 
-	// Progress bar
-	barWidth := 30
-	filled := 0
-	if total > 0 {
-		filled = (done * barWidth) / total
-	}
-	if filled > barWidth {
-		filled = barWidth
-	}
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-	pct := 0
-	if total > 0 {
-		pct = (done * 100) / total
-	}
-	fmt.Fprintf(&b, "  [%s] %d%%\n\n", bar, pct)
-
+	// Completed phases
 	for _, msg := range m.Wizard.State.ProgressMessages {
 		fmt.Fprintf(&b, "  ✓ %s\n", msg)
 	}
-	if m.Wizard.State.CurrentStep == model.StepInstall && done == 0 && !m.installing {
+
+	// Current phase with spinner
+	if m.installing {
+		b.WriteString(fmt.Sprintf("\n  %s Working...\n", m.spinner.View()))
+	}
+
+	if !m.installing && len(m.Wizard.State.ProgressMessages) == 0 {
 		b.WriteString("\nPress Enter to start installation...")
-	} else if m.installing {
-		b.WriteString("\n  ⣷ Installing... (this may take several minutes)")
 	}
 	return b.String()
 }
