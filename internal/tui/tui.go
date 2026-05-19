@@ -290,6 +290,10 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.cursor = 0
 			m.initStepFields()
+			m.initForm()
+			if m.activeForm != nil {
+				return m, m.activeForm.Init()
+			}
 			return m, nil
 		}
 	case model.StepStorage:
@@ -306,6 +310,10 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.cursor = 0
 			m.initStepFields()
+			m.initForm()
+			if m.activeForm != nil {
+				return m, m.activeForm.Init()
+			}
 			return m, nil
 		}
 	case model.StepUpdate:
@@ -341,9 +349,13 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 	m.err = nil
 	m.cursor = 0
 	m.initStepFields()
+	m.initForm()
 
 	if m.Wizard.State.CurrentStep == model.StepDone {
 		return m, tea.Quit
+	}
+	if m.activeForm != nil {
+		return m, m.activeForm.Init()
 	}
 	return m, nil
 }
