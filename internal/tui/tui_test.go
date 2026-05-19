@@ -215,3 +215,64 @@ func TestTimezoneDefault(t *testing.T) {
 		t.Errorf("expected UTC default, got %q", m.Wizard.State.Config.Timezone)
 	}
 }
+
+func TestRebootRequiresDoublePress(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepDone
+	w.State.Config.DryRun = false
+	m := New(w)
+
+	// First 'r' press should ask for confirmation, not quit
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}
+	newModel, cmd := m.Update(msg)
+	updatedModel := newModel.(*Model)
+
+	if updatedModel.quitting {
+		t.Error("first r press should not quit")
+	}
+	if cmd != nil {
+		t.Error("first r press should not produce a command")
+	}
+	if !updatedModel.confirmReboot {
+		t.Error("confirmReboot should be set after first r press")
+	}
+	if updatedModel.err == nil || updatedModel.err.Error() != "press r again to confirm reboot" {
+		t.Errorf("expected confirmation prompt, got err=%v", updatedModel.err)
+	}
+}
+
+func TestRebootDryRunDoesNotReboot(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepDone
+	w.State.Config.DryRun = true
+	m := New(w)
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}
+	newModel, cmd := m.Update(msg)
+	updatedModel := newModel.(*Model)
+
+	if updatedModel.quitting {
+		t.Error("dry-run should not quit/reboot")
+	}
+	if cmd != nil {
+		t.Error("dry-run should not produce reboot command")
+	}
+	if updatedModel.err == nil || !strings.Contains(updatedModel.err.Error(), "dry-run") {
+		t.Errorf("expected dry-run message, got err=%v", updatedModel.err)
+	}
+}
+
+func TestDoneViewDryRun(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepDone
+	w.State.Config.DryRun = true
+	m := New(w)
+
+	view := m.viewDone()
+	if !strings.Contains(view, "dry-run") {
+		t.Error("done view should mention dry-run")
+	}
+	if strings.Contains(view, "reboot") {
+		t.Error("done view should not mention reboot in dry-run mode")
+	}
+}

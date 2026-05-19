@@ -48,6 +48,7 @@ type Model struct {
 	err         error
 	quitting    bool
 	confirmQuit bool
+	confirmReboot bool
 	showButane  bool
 	installing  bool
 	fetching    bool
@@ -133,6 +134,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.confirmQuit = false
+		m.confirmReboot = false
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -236,13 +238,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.err = fmt.Errorf("press Ctrl+C again to quit, or any other key to continue")
 		return m, nil
 	case "r":
-		// Reboot on Done step
+		// Reboot on Done step — requires double-press confirmation
 		if m.Wizard.State.CurrentStep == model.StepDone {
-			m.quitting = true
-			return m, tea.Sequence(
-				tea.ExecProcess(exec.Command("systemctl", "reboot"), nil),
-				tea.Quit,
-			)
+			if m.Wizard.State.Config.DryRun {
+				m.err = fmt.Errorf("dry-run mode: would reboot (systemctl reboot)")
+				return m, nil
+			}
+			if m.confirmReboot {
+				m.quitting = true
+				return m, tea.Sequence(
+					tea.ExecProcess(exec.Command("systemctl", "reboot"), nil),
+					tea.Quit,
+				)
+			}
+			m.confirmReboot = true
+			m.err = fmt.Errorf("press r again to confirm reboot")
+			return m, nil
 		}
 		// On field steps, type the character
 		if len(m.fields) > 0 {
@@ -944,12 +955,22 @@ func (m *Model) viewInstall() string {
 }
 
 func (m *Model) viewDone() string {
+	if m.Wizard.State.Config.DryRun {
+		return `
+✅ Installation Complete! (dry-run)
+
+Flatcar Container Linux install simulation finished.
+No changes were made to disk.
+
+Press q to exit.
+`
+	}
 	return `
 ✅ Installation Complete!
 
 Flatcar Container Linux has been installed successfully.
 
-Press r to reboot now, or q to exit.
+Press r twice to reboot, or q to exit.
 `
 }
 

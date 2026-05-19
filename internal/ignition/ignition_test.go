@@ -464,3 +464,35 @@ func TestYamlEscapeNewlines(t *testing.T) {
 		t.Error("expected escaped \\n sequence in output")
 	}
 }
+
+func TestGenerateButaneWithSysextSpecialCharsURL(t *testing.T) {
+	gen := NewGenerator()
+	cfg := &model.InstallConfig{
+		Channel:  "stable",
+		Hostname: "test-node",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA k"}}},
+		Sysexts: []model.SysextEntry{
+			{Name: "test-ext", URL: `https://example.com/ext.raw?foo="bar"&baz=1`, Selected: true, Version: "1.0"},
+		},
+	}
+
+	output, err := gen.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("GenerateButane: %v", err)
+	}
+
+	// URL with quotes should be escaped and produce valid YAML
+	if !strings.Contains(output, "test-ext.raw") {
+		t.Error("missing sysext file entry")
+	}
+	// The URL should NOT contain unescaped double quotes that break YAML
+	if strings.Contains(output, `source: "https://example.com/ext.raw?foo="bar"`) {
+		t.Error("URL with quotes was not escaped — YAML will be invalid")
+	}
+	// Should contain the escaped version
+	if !strings.Contains(output, `source: "https://example.com/ext.raw?foo=\"bar\"&baz=1"`) {
+		t.Logf("output:\n%s", output)
+		t.Error("URL should have escaped quotes")
+	}
+}

@@ -148,7 +148,7 @@ storage:
 {{- range .Sysexts}}
     - path: /etc/extensions/{{.Name}}.raw
       contents:
-        source: "{{.URL}}"
+        source: "{{.URL | yamlEscape}}"
 {{- end}}
 {{- if .Timezone}}
   links:
