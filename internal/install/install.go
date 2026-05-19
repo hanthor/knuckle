@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/castrojo/knuckle/internal/ignition"
 	"github.com/castrojo/knuckle/internal/model"
@@ -18,9 +19,10 @@ type Installer interface {
 
 // FlatcarInstaller runs flatcar-install via the runner.
 type FlatcarInstaller struct {
-	Runner    runner.Runner
-	Generator *ignition.Generator
-	Logger    *slog.Logger
+	Runner       runner.Runner
+	Generator    *ignition.Generator
+	Logger       *slog.Logger
+	ignitionPath string // dynamically set temp file path
 }
 
 // NewFlatcarInstaller creates a FlatcarInstaller with the given runner and logger.
@@ -62,17 +64,19 @@ func (i *FlatcarInstaller) Install(ctx context.Context, cfg *model.InstallConfig
 			return fmt.Errorf("compiling butane: %w", err)
 		}
 
-		// Write ignition JSON to temp file for flatcar-install
+		// Write ignition JSON to secure temp file for flatcar-install
 		progress("Writing Ignition config...")
-		if err := i.WriteIgnitionFile(ctx, ignitionJSON); err != nil {
+		ignPath, err := i.WriteIgnitionFile(ignitionJSON)
+		if err != nil {
 			return fmt.Errorf("writing ignition file: %w", err)
 		}
+		i.ignitionPath = ignPath
 		// Clean up temp file after install (contains SSH keys)
-		defer i.cleanupIgnitionFile(ctx)
+		defer i.cleanupIgnitionFile()
 	}
 
 	// Build flatcar-install command args
-	args := buildInstallArgs(cfg, ignitionJSON)
+	args := buildInstallArgs(cfg, ignitionJSON, i.ignitionPath)
 
 	// Run flatcar-install
 	progress("Running flatcar-install...")
@@ -90,7 +94,7 @@ func (i *FlatcarInstaller) Install(ctx context.Context, cfg *model.InstallConfig
 	return nil
 }
 
-func buildInstallArgs(cfg *model.InstallConfig, ignitionJSON string) []string {
+func buildInstallArgs(cfg *model.InstallConfig, ignitionJSON string, ignitionPath string) []string {
 	// Prefer /dev/disk/by-id path for stable identification
 	diskPath := cfg.Disk.Path
 	if diskPath == "" {
@@ -107,24 +111,53 @@ func buildInstallArgs(cfg *model.InstallConfig, ignitionJSON string) []string {
 
 	if cfg.IgnitionURL != "" {
 		args = append(args, "-I", cfg.IgnitionURL)
-	} else if ignitionJSON != "" {
-		args = append(args, "-i", "/tmp/knuckle-ignition.json")
+	} else if ignitionPath != "" {
+		args = append(args, "-i", ignitionPath)
 	}
 
 	return args
 }
 
-// WriteIgnitionFile writes the Ignition JSON to a temp file for flatcar-install.
-// In dry-run mode this is a no-op handled by the runner.
-func (i *FlatcarInstaller) WriteIgnitionFile(ctx context.Context, ignitionJSON string) error {
-	_, err := i.Runner.RunWithInput(ctx, ignitionJSON, "sh", "-c", "umask 077 && cat > /tmp/knuckle-ignition.json")
-	return err
+// WriteIgnitionFile writes the Ignition JSON to a secure temp file.
+// Uses os.CreateTemp with O_EXCL to prevent symlink attacks (TOCTOU).
+// Returns the path to the created temp file.
+func (i *FlatcarInstaller) WriteIgnitionFile(ignitionJSON string) (string, error) {
+	// os.CreateTemp uses O_RDWR|O_CREATE|O_EXCL — fails if file exists
+	f, err := os.CreateTemp("", "knuckle-ignition-*.json")
+	if err != nil {
+		return "", fmt.Errorf("creating temp ignition file: %w", err)
+	}
+	path := f.Name()
+
+	// Set restrictive permissions (600) before writing sensitive content
+	if err := f.Chmod(0600); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", fmt.Errorf("setting ignition file permissions: %w", err)
+	}
+
+	if _, err := f.WriteString(ignitionJSON); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", fmt.Errorf("writing ignition content: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		return "", fmt.Errorf("closing ignition file: %w", err)
+	}
+
+	i.Logger.Info("ignition file written", "path", path)
+	return path, nil
 }
 
 // cleanupIgnitionFile removes the temp ignition file (contains SSH keys).
-func (i *FlatcarInstaller) cleanupIgnitionFile(ctx context.Context) {
-	_, err := i.Runner.Run(ctx, "rm", "-f", "/tmp/knuckle-ignition.json")
-	if err != nil {
-		i.Logger.Warn("failed to clean up ignition file", "error", err)
+func (i *FlatcarInstaller) cleanupIgnitionFile() {
+	if i.ignitionPath == "" {
+		return
 	}
+	if err := os.Remove(i.ignitionPath); err != nil && !os.IsNotExist(err) {
+		i.Logger.Warn("failed to clean up ignition file", "path", i.ignitionPath, "error", err)
+	}
+	i.ignitionPath = ""
 }

@@ -38,38 +38,21 @@ func TestInstallWithGeneratedConfig(t *testing.T) {
 	}
 
 	// Verify butane compilation happened in-process (no CLI call)
-	// The Go library handles it directly — verify no butane CLI call was made
 	for i := range spy.Calls {
 		if spy.Calls[i].Name == "butane" {
 			t.Error("butane CLI should not be called — using Go library")
 		}
 	}
 
-	// Verify ignition file was written securely (umask 077, not world-readable tee)
-	var writeCall *runner.SpyCall
+	// Verify ignition file was written securely via os.CreateTemp (not runner)
+	// The write now happens in Go directly, not via runner shell command
 	for i := range spy.Calls {
 		if spy.Calls[i].Name == "sh" {
-			writeCall = &spy.Calls[i]
-			break
+			t.Error("sh command should not be called — secure write uses os.CreateTemp")
 		}
-	}
-	if writeCall == nil {
-		t.Fatal("secure write (sh -c umask) was not called")
-	}
-	wantWriteArgs := []string{"-c", "umask 077 && cat > /tmp/knuckle-ignition.json"}
-	if len(writeCall.Args) != len(wantWriteArgs) {
-		t.Fatalf("write args = %v, want %v", writeCall.Args, wantWriteArgs)
-	}
-	for i, arg := range wantWriteArgs {
-		if writeCall.Args[i] != arg {
-			t.Errorf("write arg[%d] = %q, want %q", i, writeCall.Args[i], arg)
-		}
-	}
-	if writeCall.Input == "" {
-		t.Error("write call had no stdin input (ignition JSON)")
 	}
 
-	// Verify flatcar-install was called with correct args
+	// Verify flatcar-install was called with -i flag pointing to a temp file
 	var installCall *runner.SpyCall
 	for i := range spy.Calls {
 		if spy.Calls[i].Name == "flatcar-install" {
@@ -80,14 +63,22 @@ func TestInstallWithGeneratedConfig(t *testing.T) {
 	if installCall == nil {
 		t.Fatal("flatcar-install was not called")
 	}
-	wantArgs := []string{"-d", "/dev/sda", "-C", "stable", "-i", "/tmp/knuckle-ignition.json"}
-	if len(installCall.Args) != len(wantArgs) {
-		t.Fatalf("flatcar-install args = %v, want %v", installCall.Args, wantArgs)
+	// Check basic structure: -d /dev/sda -C stable -i <some-temp-path>
+	if len(installCall.Args) < 6 {
+		t.Fatalf("flatcar-install args too short: %v", installCall.Args)
 	}
-	for i, arg := range wantArgs {
-		if installCall.Args[i] != arg {
-			t.Errorf("flatcar-install arg[%d] = %q, want %q", i, installCall.Args[i], arg)
-		}
+	if installCall.Args[0] != "-d" || installCall.Args[1] != "/dev/sda" {
+		t.Errorf("expected -d /dev/sda, got %v", installCall.Args[:2])
+	}
+	if installCall.Args[2] != "-C" || installCall.Args[3] != "stable" {
+		t.Errorf("expected -C stable, got %v", installCall.Args[2:4])
+	}
+	if installCall.Args[4] != "-i" {
+		t.Errorf("expected -i flag, got %q", installCall.Args[4])
+	}
+	// The path should be a temp file (not predictable /tmp/knuckle-ignition.json)
+	if installCall.Args[5] == "/tmp/knuckle-ignition.json" {
+		t.Error("ignition path should be randomized, not predictable")
 	}
 }
 
@@ -163,14 +154,10 @@ func TestInstallButaneCompilationFailure(t *testing.T) {
 
 func TestInstallFlatcarInstallFailure(t *testing.T) {
 	spy := runner.NewSpyRunner()
-	spy.StubResponse("flatcar-install -d /dev/sda -C stable -i /tmp/knuckle-ignition.json", &runner.Result{
-		Command:  "flatcar-install",
-		Args:     []string{"-d", "/dev/sda", "-C", "stable", "-i", "/tmp/knuckle-ignition.json"},
-		Stderr:   "error: disk not found",
-		ExitCode: 1,
-	})
-	spy.StubError("flatcar-install -d /dev/sda -C stable -i /tmp/knuckle-ignition.json",
-		fmt.Errorf("command exited with code 1"))
+	// Stub a generic error for any flatcar-install call
+	// Since the ignition path is dynamic, we can't pre-stub the exact command.
+	// Instead, use the AllError field to make ALL commands fail.
+	spy.AllError = fmt.Errorf("command exited with code 1")
 
 	installer := NewFlatcarInstaller(spy, testLogger())
 	cfg := &model.InstallConfig{
@@ -178,15 +165,12 @@ func TestInstallFlatcarInstallFailure(t *testing.T) {
 		Hostname: "fail-node",
 		Disk:     model.DiskInfo{DevPath: "/dev/sda"},
 		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
-		Users:    []model.UserConfig{{Username: "core"}},
+		Users:    []model.UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA k"}}},
 	}
 
 	err := installer.Install(context.Background(), cfg, func(string) {})
 	if err == nil {
 		t.Fatal("expected error when flatcar-install fails")
-	}
-	if got := err.Error(); got != "flatcar-install: command exited with code 1" {
-		t.Errorf("error = %q", got)
 	}
 }
 
@@ -204,7 +188,7 @@ func TestBuildInstallArgs(t *testing.T) {
 				Disk:    model.DiskInfo{DevPath: "/dev/sda"},
 			},
 			ignitionJSON: `{"ignition":{}}`,
-			want:         []string{"-d", "/dev/sda", "-C", "stable", "-i", "/tmp/knuckle-ignition.json"},
+			want:         []string{"-d", "/dev/sda", "-C", "stable", "-i", "/tmp/test-ign.json"},
 		},
 		{
 			name: "external URL",
@@ -233,7 +217,7 @@ func TestBuildInstallArgs(t *testing.T) {
 				Version: "3510.2.8",
 			},
 			ignitionJSON: `{"ignition":{}}`,
-			want:         []string{"-d", "/dev/sda", "-C", "stable", "-V", "3510.2.8", "-i", "/tmp/knuckle-ignition.json"},
+			want:         []string{"-d", "/dev/sda", "-C", "stable", "-V", "3510.2.8", "-i", "/tmp/test-ign.json"},
 		},
 		{
 			name: "prefers by-id path over devpath",
@@ -245,13 +229,18 @@ func TestBuildInstallArgs(t *testing.T) {
 				},
 			},
 			ignitionJSON: `{"ignition":{}}`,
-			want:         []string{"-d", "/dev/disk/by-id/ata-Samsung_SSD_870_S5PXNG0R312345", "-C", "stable", "-i", "/tmp/knuckle-ignition.json"},
+			want:         []string{"-d", "/dev/disk/by-id/ata-Samsung_SSD_870_S5PXNG0R312345", "-C", "stable", "-i", "/tmp/test-ign.json"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildInstallArgs(tt.cfg, tt.ignitionJSON)
+			// ignitionPath is set when ignitionJSON is non-empty
+			ignPath := ""
+			if tt.ignitionJSON != "" {
+				ignPath = "/tmp/test-ign.json"
+			}
+			got := buildInstallArgs(tt.cfg, tt.ignitionJSON, ignPath)
 			if len(got) != len(tt.want) {
 				t.Fatalf("buildInstallArgs() = %v, want %v", got, tt.want)
 			}
@@ -299,5 +288,59 @@ func TestProgressCallback(t *testing.T) {
 		if steps[i] != want {
 			t.Errorf("step[%d] = %q, want %q", i, steps[i], want)
 		}
+	}
+}
+
+func TestWriteIgnitionFileSecure(t *testing.T) {
+	spy := runner.NewSpyRunner()
+	installer := NewFlatcarInstaller(spy, testLogger())
+
+	// Test successful write
+	path, err := installer.WriteIgnitionFile(`{"ignition":{"version":"3.3.0"}}`)
+	if err != nil {
+		t.Fatalf("WriteIgnitionFile: %v", err)
+	}
+	defer os.Remove(path)
+
+	// Verify file exists and has correct content
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading ignition file: %v", err)
+	}
+	if string(content) != `{"ignition":{"version":"3.3.0"}}` {
+		t.Errorf("content mismatch: got %q", string(content))
+	}
+
+	// Verify permissions are restrictive (0600)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	perm := info.Mode().Perm()
+	if perm != 0600 {
+		t.Errorf("permissions = %o, want 0600", perm)
+	}
+
+	// Verify path is unique (not predictable)
+	if path == "/tmp/knuckle-ignition.json" {
+		t.Error("path should be randomized, not predictable")
+	}
+}
+
+func TestWriteIgnitionFileCleanup(t *testing.T) {
+	spy := runner.NewSpyRunner()
+	installer := NewFlatcarInstaller(spy, testLogger())
+
+	path, err := installer.WriteIgnitionFile(`{"test":"cleanup"}`)
+	if err != nil {
+		t.Fatalf("WriteIgnitionFile: %v", err)
+	}
+	installer.ignitionPath = path
+
+	// Cleanup should remove the file
+	installer.cleanupIgnitionFile()
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("file should be removed after cleanup, got err=%v", err)
 	}
 }

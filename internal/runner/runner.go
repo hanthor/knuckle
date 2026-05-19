@@ -139,6 +139,7 @@ type SpyRunner struct {
 	Calls     []SpyCall
 	Responses map[string]*Result
 	Errors    map[string]error
+	AllError  error // if set, all commands return this error
 }
 
 // SpyCall records a single invocation of the runner.
@@ -168,6 +169,11 @@ func (r *SpyRunner) StubError(command string, err error) {
 
 func (r *SpyRunner) Run(ctx context.Context, name string, args ...string) (*Result, error) {
 	r.Calls = append(r.Calls, SpyCall{Name: name, Args: args})
+
+	if r.AllError != nil {
+		return &Result{Command: name, Args: args, ExitCode: 1}, r.AllError
+	}
+
 	key := strings.Join(append([]string{name}, args...), " ")
 
 	if err, ok := r.Errors[key]; ok {
@@ -181,6 +187,11 @@ func (r *SpyRunner) Run(ctx context.Context, name string, args ...string) (*Resu
 
 func (r *SpyRunner) RunWithInput(ctx context.Context, input string, name string, args ...string) (*Result, error) {
 	r.Calls = append(r.Calls, SpyCall{Name: name, Args: args, Input: input})
+
+	if r.AllError != nil {
+		return &Result{Command: name, Args: args, ExitCode: 1}, r.AllError
+	}
+
 	key := strings.Join(append([]string{name}, args...), " ")
 
 	if err, ok := r.Errors[key]; ok {
