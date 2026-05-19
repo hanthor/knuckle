@@ -626,9 +626,7 @@ func (m *Model) View() string {
 
 	// Non-form steps use manual rendering
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("🔧 Knuckle — Flatcar Container Linux Installer"))
-	b.WriteString("\n")
-	b.WriteString(m.renderProgressBar())
+	b.WriteString(m.buildBreadcrumb())
 	b.WriteString("\n")
 
 	switch m.Wizard.State.CurrentStep {

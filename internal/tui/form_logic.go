@@ -172,16 +172,22 @@ func (m *Model) onFormComplete() tea.Cmd {
 	return nil
 }
 
-// viewWithForm renders the header + form view for form-based steps.
+// viewWithForm renders the breadcrumb + form view for form-based steps.
 func (m *Model) viewWithForm() string {
 	var b strings.Builder
 
-	// Header
-	b.WriteString(m.viewWelcomeHeader())
-
-	// Step indicator
-	b.WriteString(m.renderProgressBar())
+	// Breadcrumb navigation (conversational style)
+	b.WriteString(m.buildBreadcrumb())
 	b.WriteString("\n")
+
+	// System checks — only on Welcome step, only if warn/fail
+	if m.Wizard.State.CurrentStep == model.StepWelcome {
+		checksStr := m.renderSystemChecks()
+		if checksStr != "" {
+			b.WriteString(checksStr)
+			b.WriteString("\n")
+		}
+	}
 
 	// Form
 	if m.activeForm != nil {

@@ -232,86 +232,98 @@ func (m *Model) reviewSummary() string {
 	return b.String()
 }
 
-// renderProgressBar creates a visual step indicator for the wizard.
+// renderProgressBar returns the breadcrumb (used by non-form step views).
 func (m *Model) renderProgressBar() string {
-	steps := []string{"Channel", "Network", "Disk", "User", "Sysext", "Update", "Review", "Install"}
-	current := int(m.Wizard.State.CurrentStep)
-
-	var parts []string
-	for i, name := range steps {
-		if i < current {
-			// Completed
-			parts = append(parts, lipgloss.NewStyle().
-				Foreground(lipgloss.Color("42")).
-				Render("✓ "+name))
-		} else if i == current {
-			// Current
-			parts = append(parts, lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("213")).
-				Render("● "+name))
-		} else {
-			// Future
-			parts = append(parts, lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240")).
-				Render("○ "+name))
-		}
-	}
-	return strings.Join(parts, "  ") + "\n"
+	return m.buildBreadcrumb()
 }
 
-// viewWelcomeHeader renders system info above the form.
-func (m *Model) viewWelcomeHeader() string {
+// buildBreadcrumb creates a conversational breadcrumb showing decisions made.
+// e.g. "knuckle › stable › Samsung 860 › core@flatcar"
+func (m *Model) buildBreadcrumb() string {
+	breadcrumbStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Bold(true)
+
+	parts := []string{accentStyle.Render("knuckle")}
+
+	cfg := &m.Wizard.State.Config
+	step := m.Wizard.State.CurrentStep
+
+	// Show prior decisions as breadcrumb trail
+	if step > model.StepWelcome && cfg.Channel != "" {
+		parts = append(parts, cfg.Channel)
+	}
+	if step > model.StepStorage && cfg.Disk.DevPath != "" {
+		disk := cfg.Disk.Model
+		if disk == "" {
+			disk = cfg.Disk.DevPath
+		}
+		parts = append(parts, disk)
+	}
+	if step > model.StepUser && len(cfg.Users) > 0 {
+		user := cfg.Users[0].Username
+		if cfg.Hostname != "" {
+			user = user + "@" + cfg.Hostname
+		}
+		parts = append(parts, user)
+	}
+
+	return breadcrumbStyle.Render(strings.Join(parts, " › ")) + "\n"
+}
+
+// renderSystemChecks returns system check output.
+// Shows one-liner if all pass, detailed view if any warn/fail.
+func (m *Model) renderSystemChecks() string {
+	if len(m.Wizard.State.SystemChecks) == 0 {
+		return ""
+	}
+
+	allOk := true
+	for _, check := range m.Wizard.State.SystemChecks {
+		if check.Status != "ok" {
+			allOk = false
+			break
+		}
+	}
+
 	var b strings.Builder
+	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	failStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("63")).
-		MarginBottom(1)
-
-	b.WriteString(headerStyle.Render("🔧 Knuckle — Flatcar Container Linux Installer"))
-	b.WriteString("\n\n")
-
-	// System checks
-	if len(m.Wizard.State.SystemChecks) > 0 {
+	if allOk {
+		b.WriteString(okStyle.Render("  ✓ System ready"))
+		details := make([]string, 0, len(m.Wizard.State.SystemChecks))
 		for _, check := range m.Wizard.State.SystemChecks {
-			icon := "✓"
-			style := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-			if check.Status == "warn" {
+			details = append(details, check.Name)
+		}
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(
+			" (" + strings.Join(details, ", ") + ")"))
+		b.WriteString("\n")
+	} else {
+		for _, check := range m.Wizard.State.SystemChecks {
+			var style lipgloss.Style
+			var icon string
+			switch check.Status {
+			case "ok":
+				style = okStyle
+				icon = "✓"
+			case "warn":
+				style = warnStyle
 				icon = "⚠"
-				style = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-			} else if check.Status == "fail" {
+			default:
+				style = failStyle
 				icon = "✗"
-				style = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 			}
 			b.WriteString(style.Render(fmt.Sprintf("  %s %s: %s", icon, check.Name, check.Detail)))
 			b.WriteString("\n")
 		}
-		b.WriteString("\n")
-	}
-
-	// Channel versions
-	if len(m.Wizard.State.Channels) > 0 {
-		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-		verifiedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-		for _, ch := range m.Wizard.State.Channels {
-			// Verification indicator
-			verifyIcon := "⚠️" // unverified
-			if ch.DigestVerified && ch.SignedDigest {
-				verifyIcon = verifiedStyle.Render("🔒") // fully verified
-			} else if ch.SBOMVerified {
-				verifyIcon = "🔓" // SBOM parsed but not signature-verified
-			}
-			fmt.Fprintf(&b, "  %s %s — Flatcar %s\n", verifyIcon, ch.Channel, ch.Version)
-			b.WriteString(dimStyle.Render(fmt.Sprintf("    kernel %s · systemd %s · docker %s",
-				ch.Kernel, ch.Systemd, ch.Docker)))
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-		// Legend
-		b.WriteString(dimStyle.Render("  🔒 = SBOM verified + signed digest  🔓 = SBOM only  ⚠️ = unverified"))
-		b.WriteString("\n\n")
 	}
 
 	return b.String()
+}
+
+// viewWelcomeHeader is kept for backward compatibility but now minimal.
+// The heavy channel version display has been removed from the default view.
+func (m *Model) viewWelcomeHeader() string {
+	return m.buildBreadcrumb()
 }

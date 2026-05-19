@@ -33,7 +33,7 @@ func TestViewWelcome(t *testing.T) {
 		m.activeForm.Init()
 	}
 	view := m.View()
-	if !strings.Contains(view, "Knuckle") {
+	if !strings.Contains(view, "knuckle") && !strings.Contains(view, "Knuckle") {
 		t.Error("view should contain title")
 	}
 	// huh form renders after init
