@@ -133,3 +133,40 @@ clean:
     #!/usr/bin/env bash
     if [ -f .vm/qemu.pid ]; then kill "$(cat .vm/qemu.pid)" 2>/dev/null || true; fi
     rm -rf bin/ .vm/
+
+# Run E2E test: install to disk + boot + verify
+e2e:
+    ./scripts/e2e-test.sh
+
+# Boot the installed target disk (after e2e or manual install)
+boot-target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -f .vm/qemu.pid ] && kill "$(cat .vm/qemu.pid)" 2>/dev/null || true
+    rm -f .vm/qemu.pid
+    sleep 1
+    {{QEMU}} \
+        -m 2048 -smp 2 -enable-kvm \
+        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid
+    echo "Booting installed system..."
+    for i in $(seq 1 20); do
+        if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=2 -p 2222 core@127.0.0.1 true 2>/dev/null; then
+            echo "Ready. SSH: ssh -p 2222 core@127.0.0.1"
+            break
+        fi
+        sleep 2
+    done
+
+# Launch live install in Ghostty (no --dry-run)
+vm-live:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just vm &
+    VM_PID=$!
+    sleep 30  # wait for VM boot
+    kill $VM_PID 2>/dev/null || true
+    # Relaunch without --dry-run
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 core@127.0.0.1 "pkill knuckle" 2>/dev/null || true
+    exec ssh -t -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 core@127.0.0.1 'sudo /tmp/knuckle --log-file /tmp/knuckle.log'
