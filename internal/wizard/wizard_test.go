@@ -587,3 +587,29 @@ if !strings.Contains(err.Error(), "interface") {
 t.Errorf("error should mention interface, got: %v", err)
 }
 }
+
+func TestValidateWelcomeRejectsInvalidChannel(t *testing.T) {
+w, _, _, _ := newTestWizard()
+w.State.CurrentStep = model.StepWelcome
+w.State.Config.Channel = "nightly"
+
+err := w.ValidateCurrentStep()
+if err == nil {
+t.Fatal("expected error for invalid channel")
+}
+if !strings.Contains(err.Error(), "nightly") {
+t.Errorf("error should mention invalid channel value, got: %v", err)
+}
+}
+
+func TestValidateWelcomeAcceptsValidChannels(t *testing.T) {
+w, _, _, _ := newTestWizard()
+w.State.CurrentStep = model.StepWelcome
+
+for _, ch := range []string{"stable", "beta", "alpha", "edge"} {
+w.State.Config.Channel = ch
+if err := w.ValidateCurrentStep(); err != nil {
+t.Errorf("channel %q should be valid, got error: %v", ch, err)
+}
+}
+}
