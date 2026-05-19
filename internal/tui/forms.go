@@ -67,6 +67,7 @@ func (m *Model) buildNetworkForm() *huh.Form {
 }
 
 // buildUserForm creates the huh form for the User step.
+// Split into two groups so it feels like a wizard progression.
 func (m *Model) buildUserForm() *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
@@ -81,22 +82,25 @@ func (m *Model) buildUserForm() *huh.Form {
 				Value(&m.Wizard.State.Config.Timezone),
 			huh.NewInput().
 				Title("Username").
+				Description("Primary user account").
 				Value(&m.usernameInput),
 			huh.NewInput().
 				Title("Password").
 				Description("Optional — leave blank for key-only auth").
 				EchoMode(huh.EchoModePassword).
 				Value(&m.passwordInput),
+		).Title("System Identity"),
+		huh.NewGroup(
 			huh.NewInput().
 				Title("GitHub Username").
-				Description("Fetches SSH public keys from GitHub").
+				Description("Fetches your SSH public keys automatically").
 				Placeholder("castrojo").
 				Value(&m.githubUserInput),
 			huh.NewInput().
 				Title("SSH Public Key").
 				Description("Or paste key directly (separate multiple with ;)").
 				Value(&m.sshKeyInput),
-		),
+		).Title("Authentication"),
 	).WithTheme(huh.ThemeDracula()).WithShowHelp(true)
 }
 
