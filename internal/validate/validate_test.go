@@ -309,7 +309,7 @@ func TestCheckConsistency(t *testing.T) {
 		return &model.InstallConfig{
 			Channel: "stable",
 			SSHKeys: []string{"ssh-ed25519 AAAA test@host"},
-			Disk: model.DiskSelection{
+			Disk: model.DiskInfo{
 				DevPath: "/dev/sda",
 			},
 			Network: model.NetworkConfig{
@@ -353,7 +353,7 @@ func TestCheckConsistency(t *testing.T) {
 			modify: func(cfg *model.InstallConfig) {
 				cfg.SSHKeys = nil
 				cfg.Users = []model.UserConfig{
-					{Name: "core", SSHKeys: []string{"ssh-ed25519 AAAA"}},
+					{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA"}},
 				}
 			},
 		},
@@ -362,7 +362,7 @@ func TestCheckConsistency(t *testing.T) {
 			modify: func(cfg *model.InstallConfig) {
 				cfg.SSHKeys = nil
 				cfg.Users = []model.UserConfig{
-					{Name: "core", PasswordHash: "$6$rounds=..."},
+					{Username: "core", PasswordHash: "$6$rounds=..."},
 				}
 			},
 		},

@@ -396,14 +396,16 @@ wantErr string
 {
 name: "no auth returns error",
 cfg: model.InstallConfig{
-Disk: model.DiskInfo{DevPath: "/dev/sda"},
+Disk:    model.DiskInfo{DevPath: "/dev/sda"},
+Channel: "stable",
 },
-wantErr: "no authentication configured",
+wantErr: "at least one authentication method required",
 },
 {
 name: "with SSH keys passes",
 cfg: model.InstallConfig{
 Disk:    model.DiskInfo{DevPath: "/dev/sda"},
+Channel: "stable",
 SSHKeys: []string{"ssh-ed25519 AAAA test"},
 },
 wantErr: "",
@@ -411,7 +413,8 @@ wantErr: "",
 {
 name: "with user SSH keys passes",
 cfg: model.InstallConfig{
-Disk: model.DiskInfo{DevPath: "/dev/sda"},
+Disk:    model.DiskInfo{DevPath: "/dev/sda"},
+Channel: "stable",
 Users: []model.UserConfig{
 {Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA test"}},
 },
@@ -421,7 +424,8 @@ wantErr: "",
 {
 name: "with password passes",
 cfg: model.InstallConfig{
-Disk: model.DiskInfo{DevPath: "/dev/sda"},
+Disk:    model.DiskInfo{DevPath: "/dev/sda"},
+Channel: "stable",
 Users: []model.UserConfig{
 {Username: "core", PasswordHash: "$2a$10$hash"},
 },
@@ -432,6 +436,7 @@ wantErr: "",
 name: "static network missing gateway errors",
 cfg: model.InstallConfig{
 Disk:    model.DiskInfo{DevPath: "/dev/sda"},
+Channel: "stable",
 SSHKeys: []string{"ssh-ed25519 AAAA test"},
 Network: model.NetworkConfig{
 Mode:    model.NetworkStatic,
@@ -442,12 +447,13 @@ Gateway: "",
 wantErr: "static network requires a gateway",
 },
 {
-name: "ignition URL bypasses auth check",
+name: "ignition URL does not bypass auth check",
 cfg: model.InstallConfig{
 Disk:        model.DiskInfo{DevPath: "/dev/sda"},
+Channel:     "stable",
 IgnitionURL: "https://example.com/config.ign",
 },
-wantErr: "",
+wantErr: "at least one authentication method required",
 },
 }
 for _, tt := range tests {
