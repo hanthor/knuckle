@@ -232,98 +232,120 @@ func (m *Model) reviewSummary() string {
 	return b.String()
 }
 
-// renderProgressBar returns the breadcrumb (used by non-form step views).
+
+// renderProgressBar returns the zen chrome (used by non-form step views).
 func (m *Model) renderProgressBar() string {
-	return m.buildBreadcrumb()
+	return m.renderZenChrome()
 }
 
-// buildBreadcrumb creates a conversational breadcrumb showing decisions made.
-// e.g. "knuckle › stable › Samsung 860 › core@flatcar"
+// buildBreadcrumb kept for form_logic.go compatibility.
 func (m *Model) buildBreadcrumb() string {
-	breadcrumbStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Bold(true)
-
-	parts := []string{accentStyle.Render("knuckle")}
-
-	cfg := &m.Wizard.State.Config
-	step := m.Wizard.State.CurrentStep
-
-	// Show prior decisions as breadcrumb trail
-	if step > model.StepWelcome && cfg.Channel != "" {
-		parts = append(parts, cfg.Channel)
-	}
-	if step > model.StepStorage && cfg.Disk.DevPath != "" {
-		disk := cfg.Disk.Model
-		if disk == "" {
-			disk = cfg.Disk.DevPath
-		}
-		parts = append(parts, disk)
-	}
-	if step > model.StepUser && len(cfg.Users) > 0 {
-		user := cfg.Users[0].Username
-		if cfg.Hostname != "" {
-			user = user + "@" + cfg.Hostname
-		}
-		parts = append(parts, user)
-	}
-
-	return breadcrumbStyle.Render(strings.Join(parts, " › ")) + "\n"
+	return m.renderZenChrome()
 }
 
-// renderSystemChecks returns system check output.
-// Shows one-liner if all pass, detailed view if any warn/fail.
+// renderSystemChecks absorbed into zen chrome — returns empty.
 func (m *Model) renderSystemChecks() string {
-	if len(m.Wizard.State.SystemChecks) == 0 {
-		return ""
-	}
+	return ""
+}
 
-	allOk := true
-	for _, check := range m.Wizard.State.SystemChecks {
-		if check.Status != "ok" {
-			allOk = false
-			break
-		}
-	}
+// viewWelcomeHeader renders zen chrome for backward compat.
+func (m *Model) viewWelcomeHeader() string {
+	return m.renderZenChrome()
+}
 
+// renderZenChrome creates the ANSI-art inspired header.
+// Aesthetic: clean framed letterform, cool blue palette, scene-era vibes.
+// Info shown via color hierarchy — version numbers always visible.
+func (m *Model) renderZenChrome() string {
 	var b strings.Builder
-	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	failStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 
-	if allOk {
-		b.WriteString(okStyle.Render("  ✓ System ready"))
-		details := make([]string, 0, len(m.Wizard.State.SystemChecks))
-		for _, check := range m.Wizard.State.SystemChecks {
-			details = append(details, check.Name)
+	// Color palette
+	logoHi := lipgloss.NewStyle().Foreground(lipgloss.Color("51")).Bold(true)
+	logoLo := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	dimColor := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	infoColor := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	accentColor := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+	okDot := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	warnDot := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	failDot := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	presentsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true)
+	sloganStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Italic(true)
+
+	// Pretext
+	b.WriteString(presentsStyle.Render("  Project Bluefin presents..."))
+	b.WriteString("\n\n")
+
+	// Logo: spaced letterform in double-line frame
+	b.WriteString(logoLo.Render("\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557"))
+	b.WriteString("\n")
+	b.WriteString(logoLo.Render("\u2551") + "    " + logoHi.Render("K N U C K L E") + "                                       " + logoLo.Render("\u2551"))
+	b.WriteString("\n")
+	b.WriteString(logoLo.Render("\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d"))
+	b.WriteString("\n")
+
+	// Subtitle + slogan
+	b.WriteString("  ")
+	b.WriteString(accentColor.Render("bare-metal Flatcar Container Linux installer"))
+	b.WriteString("\n")
+	b.WriteString("  ")
+	b.WriteString(sloganStyle.Render("Flatcar comes to the homelab, legends will rise ..."))
+	b.WriteString("\n\n")
+
+	// Info line: version + system dots
+	cfg := &m.Wizard.State.Config
+
+	var verInfo string
+	if len(m.Wizard.State.Channels) > 0 {
+		for _, ch := range m.Wizard.State.Channels {
+			if ch.Channel == cfg.Channel {
+				verInfo = fmt.Sprintf("%s %s \u00b7 kernel %s \u00b7 systemd %s",
+					ch.Channel, ch.Version, ch.Kernel, ch.Systemd)
+				break
+			}
 		}
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(
-			" (" + strings.Join(details, ", ") + ")"))
-		b.WriteString("\n")
-	} else {
-		for _, check := range m.Wizard.State.SystemChecks {
-			var style lipgloss.Style
-			var icon string
+	}
+	if verInfo == "" {
+		verInfo = cfg.Channel
+	}
+
+	b.WriteString("  ")
+	b.WriteString(infoColor.Render(verInfo))
+
+	if len(m.Wizard.State.SystemChecks) > 0 {
+		b.WriteString(dimColor.Render("  \u2502  "))
+		for i, check := range m.Wizard.State.SystemChecks {
 			switch check.Status {
 			case "ok":
-				style = okStyle
-				icon = "✓"
+				b.WriteString(okDot.Render("\u25cf"))
 			case "warn":
-				style = warnStyle
-				icon = "⚠"
+				b.WriteString(warnDot.Render("\u25cf"))
 			default:
-				style = failStyle
-				icon = "✗"
+				b.WriteString(failDot.Render("\u25cf"))
 			}
-			b.WriteString(style.Render(fmt.Sprintf("  %s %s: %s", icon, check.Name, check.Detail)))
-			b.WriteString("\n")
+			if i < len(m.Wizard.State.SystemChecks)-1 {
+				b.WriteString(" ")
+			}
 		}
 	}
+	b.WriteString("\n")
+
+	// Step progress: thin line
+	steps := 8
+	current := int(m.Wizard.State.CurrentStep)
+	b.WriteString("  ")
+	for i := 0; i < steps; i++ {
+		if i < current {
+			b.WriteString(accentColor.Render("\u2501\u2501"))
+		} else if i == current {
+			b.WriteString(logoHi.Render("\u2501\u2501"))
+		} else {
+			b.WriteString(dimColor.Render("\u2500\u2500"))
+		}
+		if i < steps-1 {
+			b.WriteString(dimColor.Render("\u00b7"))
+		}
+	}
+	b.WriteString("\n\n")
 
 	return b.String()
-}
-
-// viewWelcomeHeader is kept for backward compatibility but now minimal.
-// The heavy channel version display has been removed from the default view.
-func (m *Model) viewWelcomeHeader() string {
-	return m.buildBreadcrumb()
 }

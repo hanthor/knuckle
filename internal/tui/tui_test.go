@@ -33,7 +33,7 @@ func TestViewWelcome(t *testing.T) {
 		m.activeForm.Init()
 	}
 	view := m.View()
-	if !strings.Contains(view, "knuckle") && !strings.Contains(view, "Knuckle") {
+	if !strings.Contains(view, "K N U C K L E") && !strings.Contains(view, "knuckle") && !strings.Contains(view, "Knuckle") {
 		t.Error("view should contain title")
 	}
 	// huh form renders after init
@@ -170,13 +170,14 @@ func TestMultiSSHKeySplitting(t *testing.T) {
 func TestSystemChecksDisplayInWelcome(t *testing.T) {
 	w := newTestWizard()
 	w.State.SystemChecks = []wizard.SystemCheck{
-		{Name: "Disk", Status: "pass", Detail: "2 disk(s) found"},
+		{Name: "Disk", Status: "ok", Detail: "2 disk(s) found"},
 		{Name: "Network", Status: "warn", Detail: "no IPv4"},
 	}
 	m := New(w)
 	view := m.View()
-	if !strings.Contains(view, "Disk") {
-		t.Error("welcome should display system checks")
+	// Zen chrome shows system status as colored dots (●)
+	if !strings.Contains(view, "●") {
+		t.Error("welcome should display system check status dots")
 	}
 }
 
