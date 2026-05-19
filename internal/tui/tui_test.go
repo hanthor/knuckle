@@ -173,11 +173,13 @@ func TestSystemChecksDisplayInWelcome(t *testing.T) {
 		{Name: "Disk", Status: "ok", Detail: "2 disk(s) found"},
 		{Name: "Network", Status: "warn", Detail: "no IPv4"},
 	}
+	w.State.CurrentStep = model.StepNetwork // dots show on non-Welcome steps
 	m := New(w)
+	m.initForm()
 	view := m.View()
-	// Zen chrome shows system status as colored dots (●)
+	// Zen chrome shows system status as colored dots (●) on non-Welcome steps
 	if !strings.Contains(view, "●") {
-		t.Error("welcome should display system check status dots")
+		t.Error("non-welcome step should display system check status dots")
 	}
 }
 

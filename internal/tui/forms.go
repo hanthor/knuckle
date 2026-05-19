@@ -291,8 +291,9 @@ func (m *Model) renderZenChrome() string {
 	b.WriteString(sloganStyle.Render("Flatcar comes to the homelab, legends will rise ..."))
 	b.WriteString("\n\n")
 
-	// Info line: version + system dots
+	// Info line: version + system dots (skip on Welcome — cards show it)
 	cfg := &m.Wizard.State.Config
+	if m.Wizard.State.CurrentStep != model.StepWelcome {
 
 	// Channel as label, versions as tight key:value with │ separators
 	var verInfo string
@@ -334,6 +335,7 @@ func (m *Model) renderZenChrome() string {
 		}
 	}
 	b.WriteString("\n")
+	} // end if not Welcome
 
 	// Step progress: thin line
 	steps := 8
@@ -352,6 +354,153 @@ func (m *Model) renderZenChrome() string {
 		}
 	}
 	b.WriteString("\n\n")
+
+	return b.String()
+}
+
+// channelList returns the ordered list of channel keys for the card selector.
+func (m *Model) channelList() []string {
+	return []string{"stable", "lts", "beta", "alpha"}
+}
+
+// channelCardCount returns how many channel cards to display.
+func (m *Model) channelCardCount() int {
+	return len(m.channelList())
+}
+
+// channelMeta holds display info for each channel card.
+type channelMeta struct {
+	name    string
+	version string
+	kernel  string
+	systemd string
+	docker  string
+	desc    string
+}
+
+// getChannelMeta builds display metadata for each channel.
+func (m *Model) getChannelMeta() []channelMeta {
+	channels := m.channelList()
+	metas := make([]channelMeta, len(channels))
+
+	// Default descriptions
+	descs := map[string]string{
+		"stable": "Tested for production. Default for most deployments.",
+		"lts":    "Long-term support. Extended maintenance window.",
+		"beta":   "Next stable candidate. Test before production.",
+		"alpha":  "Bleeding edge. New kernel, systemd, core packages.",
+	}
+
+	for i, ch := range channels {
+		metas[i] = channelMeta{
+			name: ch,
+			desc: descs[ch],
+		}
+		// Fill in version info from fetched channel data
+		for _, info := range m.Wizard.State.Channels {
+			if info.Channel == ch {
+				metas[i].version = info.Version
+				metas[i].kernel = info.Kernel
+				metas[i].systemd = info.Systemd
+				metas[i].docker = info.Docker
+				break
+			}
+		}
+	}
+	return metas
+}
+
+// viewChannelCards renders Flatcar-website-style channel selector cards.
+func (m *Model) viewChannelCards() string {
+	var b strings.Builder
+
+	// Styles
+	selectedBorder := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("51")).
+		Padding(0, 1).
+		Width(60)
+	normalBorder := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(0, 1).
+		Width(60)
+	nameSelected := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51"))
+	nameNormal := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255"))
+	versionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+	detailStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("51")).Bold(true)
+
+	b.WriteString("  Select a release channel:\n\n")
+
+	metas := m.getChannelMeta()
+	for i, meta := range metas {
+		selected := i == m.cursor
+
+		// Build card content
+		var card strings.Builder
+
+		// Line 1: cursor + name + version (right-aligned)
+		cursor := "  "
+		nameStyle := nameNormal
+		if selected {
+			cursor = cursorStyle.Render("▸ ")
+			nameStyle = nameSelected
+		}
+
+		var displayName string
+		if meta.name == "lts" {
+			displayName = "LTS"
+		} else {
+			displayName = strings.ToUpper(meta.name[:1]) + meta.name[1:]
+		}
+		name := nameStyle.Render(displayName)
+		ver := ""
+		if meta.version != "" {
+			ver = versionStyle.Render("v" + meta.version)
+		}
+		// Pad between name and version
+		padding := 60 - 4 - len(meta.name) - len("v"+meta.version)
+		if padding < 1 {
+			padding = 1
+		}
+		card.WriteString(cursor + name + strings.Repeat(" ", padding) + ver)
+		card.WriteString("\n")
+
+		// Line 2: description
+		card.WriteString("  " + descStyle.Render(meta.desc))
+
+		// Line 3: component versions (if available)
+		if meta.kernel != "" || meta.systemd != "" || meta.docker != "" {
+			card.WriteString("\n")
+			parts := []string{}
+			if meta.kernel != "" {
+				parts = append(parts, "linux "+meta.kernel)
+			}
+			if meta.systemd != "" {
+				parts = append(parts, "systemd "+meta.systemd)
+			}
+			if meta.docker != "" {
+				parts = append(parts, "docker "+meta.docker)
+			}
+			card.WriteString("  " + detailStyle.Render(strings.Join(parts, " · ")))
+		}
+
+		// Render with border
+		if selected {
+			b.WriteString(selectedBorder.Render(card.String()))
+		} else {
+			b.WriteString(normalBorder.Render(card.String()))
+		}
+		b.WriteString("\n")
+	}
+
+	// Show advanced hint
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
+		"  Ctrl+A advanced options · ↑↓ select · enter continue"))
+	b.WriteString("\n")
 
 	return b.String()
 }

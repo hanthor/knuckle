@@ -16,7 +16,7 @@ import (
 func (m *Model) initForm() {
 	switch m.Wizard.State.CurrentStep {
 	case model.StepWelcome:
-		m.activeForm = m.buildWelcomeForm()
+		m.activeForm = nil // Custom card-based channel selector
 	case model.StepNetwork:
 		m.dnsInput = strings.Join(m.Wizard.State.Config.Network.DNS, ",")
 		if m.networkModeInput == "" {

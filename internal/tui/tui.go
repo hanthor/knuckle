@@ -338,6 +338,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // maxCursor returns the number of selectable items in list-based steps
 func (m *Model) maxCursor() int {
 	switch m.Wizard.State.CurrentStep {
+	case model.StepWelcome:
+		return m.channelCardCount()
 	case model.StepStorage:
 		return len(m.Wizard.State.Disks)
 	case model.StepSysext:
@@ -355,6 +357,11 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 
 	switch step {
 	case model.StepWelcome:
+		// Apply channel selection from card cursor
+		channels := m.channelList()
+		if m.cursor >= 0 && m.cursor < len(channels) {
+			m.Wizard.State.Config.Channel = channels[m.cursor]
+		}
 		// If IgnitionURL is set, skip directly to Storage
 		if m.Wizard.State.Config.IgnitionURL != "" {
 			m.Wizard.GoToStep(model.StepStorage)
@@ -630,6 +637,8 @@ func (m *Model) View() string {
 	b.WriteString("\n")
 
 	switch m.Wizard.State.CurrentStep {
+	case model.StepWelcome:
+		b.WriteString(m.viewChannelCards())
 	case model.StepStorage:
 		b.WriteString(m.viewStorage())
 	case model.StepSysext:
