@@ -68,12 +68,13 @@ tui ← cmd/knuckle
 ## Architecture Decisions
 
 1. **Runner abstraction** — All external commands go through `internal/runner`. This enables dry-run mode, test fixtures, and safe CI.
-2. **Flatcar Butane variant** — Use `variant: flatcar` (not generic CoreOS) when generating Butane configs. Import via `github.com/coreos/butane` v0.27+ (Flatcar variant, Ignition spec 3.6.0).
-3. **Mutually exclusive config modes** — v1 supports either guided local generation OR external Ignition URL passthrough. No merge logic.
+2. **Flatcar Butane variant** — Use `variant: flatcar` (not generic CoreOS) when generating Butane configs. Import via `github.com/coreos/butane` v0.27+ (Flatcar variant, Ignition spec 3.6.0). Compiled in-process via `ignition.CompileToIgnition()` — no CLI binary needed.
+3. **Mutually exclusive config modes** — v1 supports either guided local generation OR external Ignition URL passthrough (Ctrl+A advanced toggle). No merge logic.
 4. **Disk identity** — Use `/dev/disk/by-id` paths. Never rely on `/dev/sda` ordering.
 5. **TUI ↔ logic separation** — `internal/tui` renders views; `internal/wizard` manages state transitions. No business logic in view models.
 6. **Shared data model** — `internal/model` owns all data types. Wizard builds them, TUI reads/writes fields, ignition consumes them, validate checks them.
-7. **One top-level Bubble Tea Model** — Parent model dispatches to step sub-models. Step transitions are `tea.Cmd`s. Use `huh.Form` for form steps, raw Bubble Tea for disk table and progress.
+7. **huh.Form for form steps** — Welcome, Network, User, Review use `charmbracelet/huh` with Dracula theme. Storage, Sysext, Update, Install, Done use raw Bubble Tea. Validation via `.Validate()` callbacks. Multi-group forms for wizard paging.
+8. **Supply chain verification** — SBOM JSON (SPDX) is primary source for package versions. SHA512 digest verification against `.DIGESTS` file. GPG-signed digest presence check. Visual indicators (🔒/🔓/⚠️) in TUI.
 
 ## Testing Strategy
 
