@@ -119,3 +119,19 @@ func TestParsePackageList(t *testing.T) {
 		t.Errorf("systemd: got %q, want %q", info.Systemd, "257.9")
 	}
 }
+
+func TestFetchChannelInfo_CancelledContext(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(mockVersionTxt))
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	_, err := fetchChannelInfoFromURLs(ctx, "stable", ts.URL+"/version.txt", ts.URL+"/packages.txt")
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+}

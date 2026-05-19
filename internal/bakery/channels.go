@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ChannelInfo holds version details for a Flatcar release channel.
@@ -109,7 +110,8 @@ func httpGet(ctx context.Context, url string) (string, error) {
 	}
 	req.Header.Set("User-Agent", "knuckle/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
