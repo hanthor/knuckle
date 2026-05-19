@@ -132,7 +132,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.Wizard.State.CurrentStep = model.StepDone
-		return m, tea.Quit
+		// Don't quit immediately — show Done screen, let user press q to exit
+		return m, nil
 	case fetchKeysMsg:
 		m.fetching = false
 		if msg.err != nil {
