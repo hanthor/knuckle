@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/crypto/bcrypt"
 
@@ -50,6 +51,14 @@ type Model struct {
 	cursor      int
 	fields      []field
 	fieldIdx    int
+
+	// huh form state
+	activeForm    *huh.Form
+	dnsInput      string
+	usernameInput string
+	passwordInput string
+	githubUserInput string
+	sshKeyInput   string
 }
 
 type field struct {
@@ -62,16 +71,36 @@ type field struct {
 // New creates a new TUI model
 func New(w *wizard.Wizard) *Model {
 	m := &Model{Wizard: w}
+	if len(w.State.Config.Users) > 0 {
+		m.usernameInput = w.State.Config.Users[0].Username
+	}
 	m.initStepFields()
+	m.initForm()
 	return m
 }
 
-func (m *Model) Init() tea.Cmd { return nil }
+func (m *Model) Init() tea.Cmd {
+	if m.activeForm != nil {
+		return m.activeForm.Init()
+	}
+	return nil
+}
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		// Global keys override form
+		switch msg.String() {
+		case "ctrl+c":
+			if m.confirmQuit {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			m.confirmQuit = true
+			m.err = fmt.Errorf("press Ctrl+C again to quit, or any other key to continue")
+			return m, nil
+		}
+		m.confirmQuit = false
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -98,7 +127,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(cfg.Users) > 0 {
 			cfg.Users[0].SSHKeys = msg.keys
 		}
-		// Now advance to next step
 		if err := m.Wizard.Next(); err != nil {
 			m.err = err
 			return m, nil
@@ -106,7 +134,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.cursor = 0
 		m.initStepFields()
+		m.initForm()
+		if m.activeForm != nil {
+			return m, m.activeForm.Init()
+		}
 		return m, nil
+	}
+
+	// Delegate to huh form if active
+	if m.activeForm != nil {
+		form, cmd := m.activeForm.Update(msg)
+		if f, ok := form.(*huh.Form); ok {
+			m.activeForm = f
+		}
+		if m.activeForm.State == huh.StateCompleted {
+			return m, m.onFormComplete()
+		}
+		if m.activeForm.State == huh.StateAborted {
+			m.Wizard.Previous()
+			m.err = nil
+			m.cursor = 0
+			m.initStepFields()
+			m.initForm()
+			if m.activeForm != nil {
+				return m, m.activeForm.Init()
+			}
+			return m, nil
+		}
+		return m, cmd
+	}
+
+	// Non-form steps: handle keys
+	if msg, ok := msg.(tea.KeyMsg); ok {
+		return m.handleKey(msg)
 	}
 	return m, nil
 }
@@ -434,6 +494,12 @@ func (m *Model) View() string {
 		return "Installation cancelled.\n"
 	}
 
+	// Form-based steps use huh rendering
+	if m.activeForm != nil {
+		return m.viewWithForm()
+	}
+
+	// Non-form steps use manual rendering
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("🔧 Knuckle — Flatcar Container Linux Installer"))
 	b.WriteString("\n")
@@ -444,20 +510,12 @@ func (m *Model) View() string {
 	b.WriteString("\n\n")
 
 	switch m.Wizard.State.CurrentStep {
-	case model.StepWelcome:
-		b.WriteString(m.viewWelcome())
-	case model.StepNetwork:
-		b.WriteString(m.viewNetwork())
 	case model.StepStorage:
 		b.WriteString(m.viewStorage())
-	case model.StepUser:
-		b.WriteString(m.viewUser())
 	case model.StepSysext:
 		b.WriteString(m.viewSysext())
 	case model.StepUpdate:
 		b.WriteString(m.viewUpdate())
-	case model.StepReview:
-		b.WriteString(m.viewReview())
 	case model.StepInstall:
 		b.WriteString(m.viewInstall())
 	case model.StepDone:

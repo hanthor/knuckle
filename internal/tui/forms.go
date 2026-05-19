@@ -1,0 +1,191 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/castrojo/knuckle/internal/model"
+)
+
+// buildWelcomeForm creates the huh form for the Welcome step.
+func (m *Model) buildWelcomeForm() *huh.Form {
+	channels := []huh.Option[string]{
+		huh.NewOption("stable", "stable"),
+		huh.NewOption("beta", "beta"),
+		huh.NewOption("alpha", "alpha"),
+		huh.NewOption("edge", "edge"),
+	}
+
+	return huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Release Channel").
+				Options(channels...).
+				Value(&m.Wizard.State.Config.Channel),
+			huh.NewInput().
+				Title("Version").
+				Description("Leave blank for latest").
+				Placeholder("e.g. 4593.2.1").
+				Value(&m.Wizard.State.Config.Version),
+			huh.NewInput().
+				Title("External Ignition URL").
+				Description("Skip wizard — pass URL directly to flatcar-install").
+				Placeholder("https://example.com/config.ign").
+				Value(&m.Wizard.State.Config.IgnitionURL),
+		),
+	).WithTheme(huh.ThemeDracula()).WithShowHelp(true)
+}
+
+// buildNetworkForm creates the huh form for the Network step.
+func (m *Model) buildNetworkForm() *huh.Form {
+	return huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Interface").
+				Description("Network interface for static config (leave blank for DHCP)").
+				Placeholder("eth0").
+				Value(&m.Wizard.State.Config.Network.Interface),
+			huh.NewInput().
+				Title("IP Address (CIDR)").
+				Placeholder("192.168.1.100/24").
+				Value(&m.Wizard.State.Config.Network.Address),
+			huh.NewInput().
+				Title("Gateway").
+				Placeholder("192.168.1.1").
+				Value(&m.Wizard.State.Config.Network.Gateway),
+			huh.NewInput().
+				Title("DNS Servers").
+				Description("Comma-separated").
+				Placeholder("1.1.1.1,8.8.8.8").
+				Value(&m.dnsInput),
+		),
+	).WithTheme(huh.ThemeDracula()).WithShowHelp(true)
+}
+
+// buildUserForm creates the huh form for the User step.
+func (m *Model) buildUserForm() *huh.Form {
+	return huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Hostname").
+				Placeholder("flatcar-node01").
+				Value(&m.Wizard.State.Config.Hostname),
+			huh.NewInput().
+				Title("Timezone").
+				Placeholder("UTC").
+				Description("e.g. America/New_York, Europe/Berlin").
+				Value(&m.Wizard.State.Config.Timezone),
+			huh.NewInput().
+				Title("Username").
+				Value(&m.usernameInput),
+			huh.NewInput().
+				Title("Password").
+				Description("Optional — leave blank for key-only auth").
+				EchoMode(huh.EchoModePassword).
+				Value(&m.passwordInput),
+			huh.NewInput().
+				Title("GitHub Username").
+				Description("Fetches SSH public keys from GitHub").
+				Placeholder("castrojo").
+				Value(&m.githubUserInput),
+			huh.NewInput().
+				Title("SSH Public Key").
+				Description("Or paste key directly (separate multiple with ;)").
+				Value(&m.sshKeyInput),
+		),
+	).WithTheme(huh.ThemeDracula()).WithShowHelp(true)
+}
+
+// buildReviewForm creates the huh confirm for the Review step.
+func (m *Model) buildReviewForm() *huh.Form {
+	return huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("⚠️  DESTRUCTIVE OPERATION — Install Flatcar to disk?").
+				Description(m.reviewSummary()).
+				Affirmative("Yes, install").
+				Negative("Go back").
+				Value(&m.Wizard.State.Confirmed),
+		),
+	).WithTheme(huh.ThemeDracula()).WithShowHelp(true)
+}
+
+func (m *Model) reviewSummary() string {
+	cfg := &m.Wizard.State.Config
+	var b strings.Builder
+	fmt.Fprintf(&b, "Channel: %s", cfg.Channel)
+	if cfg.Version != "" {
+		fmt.Fprintf(&b, " (v%s)", cfg.Version)
+	}
+	fmt.Fprintf(&b, "\nDisk: %s", cfg.Disk.DevPath)
+	if cfg.Disk.Model != "" {
+		fmt.Fprintf(&b, " (%s, %s)", cfg.Disk.Model, cfg.Disk.SizeHuman)
+	}
+	fmt.Fprintf(&b, "\nNetwork: %s", cfg.Network.Mode)
+	if cfg.Network.Mode == model.NetworkStatic {
+		fmt.Fprintf(&b, " — %s via %s", cfg.Network.Address, cfg.Network.Gateway)
+	}
+	fmt.Fprintf(&b, "\nHostname: %s", cfg.Hostname)
+	if len(cfg.Users) > 0 {
+		fmt.Fprintf(&b, "\nUser: %s", cfg.Users[0].Username)
+	}
+	if len(cfg.SSHKeys) > 0 {
+		fmt.Fprintf(&b, "\nSSH Keys: %d key(s)", len(cfg.SSHKeys))
+	}
+	if len(cfg.Sysexts) > 0 {
+		names := make([]string, len(cfg.Sysexts))
+		for i, s := range cfg.Sysexts {
+			names[i] = s.Name
+		}
+		fmt.Fprintf(&b, "\nSysexts: %s", strings.Join(names, ", "))
+	}
+	return b.String()
+}
+
+// viewWelcomeHeader renders system info above the form.
+func (m *Model) viewWelcomeHeader() string {
+	var b strings.Builder
+
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("63")).
+		MarginBottom(1)
+
+	b.WriteString(headerStyle.Render("🔧 Knuckle — Flatcar Container Linux Installer"))
+	b.WriteString("\n\n")
+
+	// System checks
+	if len(m.Wizard.State.SystemChecks) > 0 {
+		for _, check := range m.Wizard.State.SystemChecks {
+			icon := "✓"
+			style := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+			if check.Status == "warn" {
+				icon = "⚠"
+				style = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+			} else if check.Status == "fail" {
+				icon = "✗"
+				style = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+			}
+			b.WriteString(style.Render(fmt.Sprintf("  %s %s: %s", icon, check.Name, check.Detail)))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	// Channel versions
+	if len(m.Wizard.State.Channels) > 0 {
+		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+		for _, ch := range m.Wizard.State.Channels {
+			fmt.Fprintf(&b, "  %s — Flatcar %s\n", ch.Channel, ch.Version)
+			b.WriteString(dimStyle.Render(fmt.Sprintf("    kernel %s · systemd %s · docker %s",
+				ch.Kernel, ch.Systemd, ch.Docker)))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}

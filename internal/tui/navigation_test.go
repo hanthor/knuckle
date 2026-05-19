@@ -10,7 +10,6 @@ import (
 
 func TestFullWizardNavigation(t *testing.T) {
 	w := newTestWizard()
-	// Set up disks so storage step can proceed
 	w.State.Disks = []model.DiskInfo{
 		{DevPath: "/dev/vda", Model: "QEMU", SizeHuman: "50 GB", Transport: "virtio"},
 	}
@@ -24,45 +23,65 @@ func TestFullWizardNavigation(t *testing.T) {
 
 	m := New(w)
 
-	// Navigate: Welcome → Network → Storage → User → Sysext → Update → Review
-	steps := []model.WizardStep{
-		model.StepWelcome,
-		model.StepNetwork,
-		model.StepStorage,
-		model.StepUser,
-		model.StepSysext,
-		model.StepUpdate,
+	// Form-based steps (Welcome, Network, User) advance via onFormComplete()
+	// Simulate form completion for Welcome
+	m.Wizard.State.CurrentStep = model.StepWelcome
+	cmd := m.onFormComplete()
+	_ = cmd
+
+	if m.Wizard.State.CurrentStep != model.StepNetwork {
+		t.Fatalf("after Welcome complete: expected Network, got %v", m.Wizard.State.CurrentStep)
 	}
 
-	for i, expectedStep := range steps {
-		if m.Wizard.State.CurrentStep != expectedStep {
-			t.Fatalf("step %d: expected %v, got %v", i, expectedStep, m.Wizard.State.CurrentStep)
-		}
-		// Press Enter to advance (for storage, select disk first)
-		if expectedStep == model.StepStorage {
-			m.cursor = 0 // select first disk
-		}
-		newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		m = newModel.(*Model)
+	// Simulate Network form complete
+	cmd = m.onFormComplete()
+	_ = cmd
+	if m.Wizard.State.CurrentStep != model.StepStorage {
+		t.Fatalf("after Network complete: expected Storage, got %v", m.Wizard.State.CurrentStep)
 	}
 
-	// Should be at Review after advancing from Update
+	// Storage is non-form: press Enter to advance
+	m.cursor = 0
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(*Model)
+	if m.Wizard.State.CurrentStep != model.StepUser {
+		t.Fatalf("after Storage: expected User, got %v", m.Wizard.State.CurrentStep)
+	}
+
+	// Simulate User form complete
+	m.usernameInput = "core"
+	cmd = m.onFormComplete()
+	_ = cmd
+	if m.Wizard.State.CurrentStep != model.StepSysext {
+		t.Fatalf("after User complete: expected Sysext, got %v", m.Wizard.State.CurrentStep)
+	}
+
+	// Sysext is non-form: press Enter
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(*Model)
+	if m.Wizard.State.CurrentStep != model.StepUpdate {
+		t.Fatalf("after Sysext: expected Update, got %v", m.Wizard.State.CurrentStep)
+	}
+
+	// Update is non-form: press Enter
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(*Model)
 	if m.Wizard.State.CurrentStep != model.StepReview {
-		t.Errorf("expected StepReview, got %v", m.Wizard.State.CurrentStep)
+		t.Fatalf("after Update: expected Review, got %v", m.Wizard.State.CurrentStep)
 	}
 }
 
 func TestBackNavigation(t *testing.T) {
 	w := newTestWizard()
-	w.State.CurrentStep = model.StepUser
+	w.State.CurrentStep = model.StepStorage // Non-form step
 	m := New(w)
 
-	// Press Esc to go back
+	// Press Esc on non-form step
 	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	tuiModel := newModel.(*Model)
 
-	if tuiModel.Wizard.State.CurrentStep != model.StepStorage {
-		t.Errorf("expected StepStorage after Esc from User, got %v", tuiModel.Wizard.State.CurrentStep)
+	if tuiModel.Wizard.State.CurrentStep != model.StepNetwork {
+		t.Errorf("expected Network after Esc from Storage, got %v", tuiModel.Wizard.State.CurrentStep)
 	}
 }
 
@@ -71,15 +90,14 @@ func TestIgnitionURLSkipsSteps(t *testing.T) {
 	w.State.Disks = []model.DiskInfo{
 		{DevPath: "/dev/vda", Model: "QEMU", SizeHuman: "50 GB"},
 	}
+	w.State.Config.IgnitionURL = "https://example.com/config.ign"
 	m := New(w)
-	// Set ignition URL in welcome field (index 2 = "ignition_url")
-	m.fields[2].value = "https://example.com/config.ign"
 
-	// Press Enter on Welcome — should skip to Storage
-	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	tuiModel := newModel.(*Model)
+	// Simulate Welcome form complete with IgnitionURL set
+	cmd := m.onFormComplete()
+	_ = cmd
 
-	if tuiModel.Wizard.State.CurrentStep != model.StepStorage {
-		t.Errorf("expected skip to StepStorage with IgnitionURL, got %v", tuiModel.Wizard.State.CurrentStep)
+	if m.Wizard.State.CurrentStep != model.StepStorage {
+		t.Errorf("expected skip to StepStorage with IgnitionURL, got %v", m.Wizard.State.CurrentStep)
 	}
 }
