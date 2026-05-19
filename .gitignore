@@ -21,3 +21,7 @@ coverage.out
 
 # VM testing artifacts
 .vm/
+
+# ISO build artifacts
+.iso-build/
+output/

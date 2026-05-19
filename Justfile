@@ -116,6 +116,29 @@ boot-target:
 e2e:
     ./scripts/e2e-test.sh
 
+# Build installer ISO (requires xorriso, mtools, cpio; GRUB optional)
+iso *CHANNEL='stable':
+    ./scripts/build-iso.sh {{CHANNEL}}
+
+# Boot ISO in QEMU with UEFI (requires OVMF)
+boot-iso:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ISO="output/knuckle-installer-stable.iso"
+    [ -f "$ISO" ] || { echo "No ISO. Run: just iso"; exit 1; }
+    just _kill-vm
+    [ -f .vm/target.qcow2 ] || qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
+    OVMF="/home/linuxbrew/.linuxbrew/Cellar/qemu/11.0.0/share/qemu/edk2-x86_64-code.fd"
+    [ -f "$OVMF" ] || { echo "OVMF not found at $OVMF"; exit 1; }
+    echo "Booting ISO (UEFI)... Ctrl-a x to quit"
+    {{QEMU}} \
+        -m 4096 -smp 2 -enable-kvm \
+        -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
+        -cdrom "$ISO" \
+        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -nographic
+
 # Stop running VM
 stop:
     just _kill-vm
