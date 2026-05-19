@@ -125,9 +125,8 @@ return nil
 }
 
 func (w *Wizard) validateWelcome() error {
-validChannels := map[string]bool{"stable": true, "beta": true, "alpha": true, "edge": true}
-if w.State.Config.Channel != "" && !validChannels[w.State.Config.Channel] {
-return fmt.Errorf("invalid channel %q (must be stable, beta, alpha, or edge)", w.State.Config.Channel)
+if err := validate.Channel(w.State.Config.Channel); err != nil {
+return err
 }
 if w.State.Config.IgnitionURL != "" {
 if err := validate.URL(w.State.Config.IgnitionURL); err != nil {

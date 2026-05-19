@@ -142,19 +142,18 @@ m := New(w)
 
 // Initially butane preview is hidden
 view := m.View()
-if !strings.Contains(view, "Press 'b' to preview Butane YAML") {
+if !strings.Contains(view, "Press Ctrl+B to preview Butane YAML") {
 t.Error("expected butane preview hint before toggle")
 }
 if strings.Contains(view, "Butane YAML Preview") {
 t.Error("butane preview should not show before toggle")
 }
 
-// Press 'b' to toggle preview on (confirm field must be empty)
-m.fields[0].value = ""
-newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+// Press Ctrl+B to toggle preview on
+newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
 tuiModel := newModel.(*Model)
 if !tuiModel.showButane {
-t.Error("showButane should be true after pressing 'b'")
+t.Error("showButane should be true after pressing Ctrl+B")
 }
 view = tuiModel.View()
 if !strings.Contains(view, "Butane YAML Preview") {

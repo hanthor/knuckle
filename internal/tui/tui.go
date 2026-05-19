@@ -12,6 +12,7 @@ import (
 
 	"github.com/castrojo/knuckle/internal/github"
 	"github.com/castrojo/knuckle/internal/model"
+	"github.com/castrojo/knuckle/internal/validate"
 	"github.com/castrojo/knuckle/internal/wizard"
 )
 
@@ -155,13 +156,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.fields[m.fieldIdx].value += " "
 		}
 		return m, nil
-	case "b":
-		if m.Wizard.State.CurrentStep == model.StepReview && len(m.fields) > 0 && m.fields[m.fieldIdx].value == "" {
+	case "ctrl+b":
+		if m.Wizard.State.CurrentStep == model.StepReview {
 			m.showButane = !m.showButane
-			return m, nil
-		}
-		if len(m.fields) > 0 && len("b") == 1 {
-			m.fields[m.fieldIdx].value += "b"
 		}
 		return m, nil
 	default:
@@ -263,6 +260,10 @@ func (m *Model) applyFields() {
 			switch f.key {
 			case "channel":
 				if f.value != "" {
+					if err := validate.Channel(f.value); err != nil {
+						m.err = err
+						return
+					}
 					cfg.Channel = f.value
 				}
 			case "version":
@@ -704,7 +705,7 @@ func (m *Model) viewReview() string {
 			}
 			b.WriteString("───────────────────────────\n")
 		} else {
-			b.WriteString("\n  Press 'b' to preview Butane YAML\n")
+			b.WriteString("\n  Press Ctrl+B to preview Butane YAML\n")
 		}
 	}
 
