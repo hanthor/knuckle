@@ -34,7 +34,7 @@ func NewFlatcarInstaller(r runner.Runner, logger *slog.Logger) *FlatcarInstaller
 
 // Install performs the Flatcar installation:
 // 1. Generate Butane YAML (or use external IgnitionURL)
-// 2. Compile Butane → Ignition JSON via butane CLI
+// 2. Compile Butane → Ignition JSON via coreos/butane Go library
 // 3. Run flatcar-install with the target disk, channel, and ignition config
 func (i *FlatcarInstaller) Install(ctx context.Context, cfg *model.InstallConfig, progress func(step string)) error {
 	if cfg == nil {
@@ -54,16 +54,13 @@ func (i *FlatcarInstaller) Install(ctx context.Context, cfg *model.InstallConfig
 			return fmt.Errorf("generating butane config: %w", err)
 		}
 
-		// Compile to Ignition JSON via butane CLI
+		// Compile to Ignition JSON via coreos/butane Go library
+		// (butane CLI is not available on Flatcar Container Linux)
 		progress("Compiling Ignition config...")
-		result, err := i.Runner.RunWithInput(ctx, butaneYAML, "butane", "--strict")
+		ignitionJSON, err = ignition.CompileToIgnition(butaneYAML)
 		if err != nil {
 			return fmt.Errorf("compiling butane: %w", err)
 		}
-		if result.ExitCode != 0 {
-			return fmt.Errorf("butane compilation failed: %s", result.Stderr)
-		}
-		ignitionJSON = result.Stdout
 
 		// Write ignition JSON to temp file for flatcar-install
 		progress("Writing Ignition config...")

@@ -1,6 +1,6 @@
 // Package ignition generates Butane YAML configs from InstallConfig.
-// The generated YAML is Flatcar variant, spec 1.1.0, and can be compiled
-// to Ignition JSON via the butane CLI at install time.
+// The generated YAML is Flatcar variant, spec 1.1.0, compiled to Ignition
+// JSON via the coreos/butane Go library (not the CLI, which isn't on Flatcar).
 package ignition
 
 import (

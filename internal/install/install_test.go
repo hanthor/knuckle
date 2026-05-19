@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/castrojo/knuckle/internal/ignition"
 	"github.com/castrojo/knuckle/internal/model"
 	"github.com/castrojo/knuckle/internal/runner"
 )
@@ -17,12 +18,6 @@ func testLogger() *slog.Logger {
 
 func TestInstallWithGeneratedConfig(t *testing.T) {
 	spy := runner.NewSpyRunner()
-	spy.StubResponse("butane --strict", &runner.Result{
-		Command:  "butane",
-		Args:     []string{"--strict"},
-		Stdout:   `{"ignition":{"version":"3.4.0"}}`,
-		ExitCode: 0,
-	})
 
 	installer := NewFlatcarInstaller(spy, testLogger())
 	cfg := &model.InstallConfig{
@@ -42,22 +37,12 @@ func TestInstallWithGeneratedConfig(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify butane was called with input (Butane YAML as stdin)
-	var butaneCall *runner.SpyCall
+	// Verify butane compilation happened in-process (no CLI call)
+	// The Go library handles it directly — verify no butane CLI call was made
 	for i := range spy.Calls {
 		if spy.Calls[i].Name == "butane" {
-			butaneCall = &spy.Calls[i]
-			break
+			t.Error("butane CLI should not be called — using Go library")
 		}
-	}
-	if butaneCall == nil {
-		t.Fatal("butane was not called")
-	}
-	if butaneCall.Input == "" {
-		t.Error("butane was called without stdin input")
-	}
-	if len(butaneCall.Args) != 1 || butaneCall.Args[0] != "--strict" {
-		t.Errorf("butane args = %v, want [--strict]", butaneCall.Args)
 	}
 
 	// Verify ignition file was written securely (umask 077, not world-readable tee)
@@ -163,42 +148,21 @@ func TestInstallNilConfig(t *testing.T) {
 	}
 }
 
-func TestInstallButaneFailure(t *testing.T) {
-	spy := runner.NewSpyRunner()
-	spy.StubResponse("butane --strict", &runner.Result{
-		Command:  "butane",
-		Args:     []string{"--strict"},
-		Stdout:   "",
-		Stderr:   "error: invalid yaml at line 3",
-		ExitCode: 1,
-	})
-
-	installer := NewFlatcarInstaller(spy, testLogger())
-	cfg := &model.InstallConfig{
-		Channel:  "stable",
-		Hostname: "fail-node",
-		Disk:     model.DiskInfo{DevPath: "/dev/sda"},
-		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
-		Users:    []model.UserConfig{{Username: "core"}},
-	}
-
-	err := installer.Install(context.Background(), cfg, func(string) {})
+func TestInstallButaneCompilationFailure(t *testing.T) {
+	// Test that CompileToIgnition properly rejects invalid Butane YAML.
+	// Since the install path now uses the Go library directly, we test
+	// the compilation function with intentionally malformed input.
+	_, err := ignition.CompileToIgnition("not: valid: butane: {{{")
 	if err == nil {
-		t.Fatal("expected error when butane fails")
+		t.Fatal("expected error for invalid Butane YAML")
 	}
-	if got := err.Error(); got != "butane compilation failed: error: invalid yaml at line 3" {
-		t.Errorf("error = %q, want butane compilation failed message", got)
+	if got := err.Error(); got == "" {
+		t.Error("error message should not be empty")
 	}
 }
 
 func TestInstallFlatcarInstallFailure(t *testing.T) {
 	spy := runner.NewSpyRunner()
-	spy.StubResponse("butane --strict", &runner.Result{
-		Command:  "butane",
-		Args:     []string{"--strict"},
-		Stdout:   `{"ignition":{"version":"3.4.0"}}`,
-		ExitCode: 0,
-	})
 	spy.StubResponse("flatcar-install -d /dev/sda -C stable -i /tmp/knuckle-ignition.json", &runner.Result{
 		Command:  "flatcar-install",
 		Args:     []string{"-d", "/dev/sda", "-C", "stable", "-i", "/tmp/knuckle-ignition.json"},
@@ -280,12 +244,6 @@ func TestBuildInstallArgs(t *testing.T) {
 
 func TestProgressCallback(t *testing.T) {
 	spy := runner.NewSpyRunner()
-	spy.StubResponse("butane --strict", &runner.Result{
-		Command:  "butane",
-		Args:     []string{"--strict"},
-		Stdout:   `{"ignition":{"version":"3.4.0"}}`,
-		ExitCode: 0,
-	})
 
 	installer := NewFlatcarInstaller(spy, testLogger())
 	cfg := &model.InstallConfig{
