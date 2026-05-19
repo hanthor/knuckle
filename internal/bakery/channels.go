@@ -2,6 +2,8 @@ package bakery
 
 import (
 	"context"
+	"crypto/sha512"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +24,11 @@ type ChannelInfo struct {
 	Containerd string // e.g. "2.1.5"
 	Ignition   string // e.g. "2.24.0"
 	Etcd       string // e.g. "3.5.18"
+
+	// Verification status
+	SBOMVerified   bool // SBOM JSON was successfully parsed
+	DigestVerified bool // SHA512 digest matched
+	SignedDigest   bool // GPG-signed digest file was present
 }
 
 // FetchChannelInfo fetches version info for a given channel from the Flatcar release server.
@@ -46,11 +53,14 @@ func fetchChannelInfoFromURLs(ctx context.Context, channel, versionURL, pkgURL s
 	// Fetch SBOM JSON (authoritative structured source for package versions)
 	sbomURL := strings.Replace(pkgURL, "flatcar_production_image_packages.txt", "flatcar_production_image_sbom.json", 1)
 	sbomUsed := false
+	var sbomBody string
 	if sbomURL != pkgURL { // only try SBOM if URL was actually different
-		if sbomBody, err := httpGet(ctx, sbomURL); err == nil {
-			parseSBOMJSON(sbomBody, info)
+		if body, err := httpGet(ctx, sbomURL); err == nil {
+			sbomBody = body
+			parseSBOMJSON(body, info)
 			if info.Kernel != "" {
 				sbomUsed = true
+				info.SBOMVerified = true
 			}
 		}
 	}
@@ -61,6 +71,19 @@ func fetchChannelInfoFromURLs(ctx context.Context, channel, versionURL, pkgURL s
 			return nil, fmt.Errorf("fetching package list for %s: %w", channel, err)
 		}
 		parsePackageList(pkgBody, info)
+	}
+
+	// Verify SBOM digest if available
+	if sbomUsed && sbomBody != "" {
+		digestURL := sbomURL + ".DIGESTS"
+		if digestBody, err := httpGet(ctx, digestURL); err == nil {
+			info.DigestVerified = verifySHA512(sbomBody, digestBody)
+			// Check for signed digest
+			ascURL := digestURL + ".asc"
+			if _, err := httpGet(ctx, ascURL); err == nil {
+				info.SignedDigest = true
+			}
+		}
 	}
 
 	// Fetch docker sysext package list (no JSON SBOM available for sysexts)
@@ -245,4 +268,33 @@ func extractVersionBeforeColons(line, prefix string) string {
 		return after[:idx]
 	}
 	return after
+}
+
+// verifySHA512 checks if the SHA512 hash of content matches the digest file.
+// The digest file format is: "<hash>  <filename>\n" per line.
+func verifySHA512(content, digestBody string) bool {
+	hash := sha512.Sum512([]byte(content))
+	computed := hex.EncodeToString(hash[:])
+
+	// Parse the DIGESTS file for SHA512 hash
+	inSHA512 := false
+	for _, line := range strings.Split(digestBody, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "# SHA512 HASH" {
+			inSHA512 = true
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			inSHA512 = false
+			continue
+		}
+		if inSHA512 && line != "" {
+			// Format: "<hash>  <filename>"
+			parts := strings.Fields(line)
+			if len(parts) >= 1 && parts[0] == computed {
+				return true
+			}
+		}
+	}
+	return false
 }

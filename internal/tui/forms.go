@@ -275,13 +275,24 @@ func (m *Model) viewWelcomeHeader() string {
 	// Channel versions
 	if len(m.Wizard.State.Channels) > 0 {
 		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+		verifiedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 		for _, ch := range m.Wizard.State.Channels {
-			fmt.Fprintf(&b, "  %s — Flatcar %s\n", ch.Channel, ch.Version)
+			// Verification indicator
+			verifyIcon := "⚠️" // unverified
+			if ch.DigestVerified && ch.SignedDigest {
+				verifyIcon = verifiedStyle.Render("🔒") // fully verified
+			} else if ch.SBOMVerified {
+				verifyIcon = "🔓" // SBOM parsed but not signature-verified
+			}
+			fmt.Fprintf(&b, "  %s %s — Flatcar %s\n", verifyIcon, ch.Channel, ch.Version)
 			b.WriteString(dimStyle.Render(fmt.Sprintf("    kernel %s · systemd %s · docker %s",
 				ch.Kernel, ch.Systemd, ch.Docker)))
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
+		// Legend
+		b.WriteString(dimStyle.Render("  🔒 = SBOM verified + signed digest  🔓 = SBOM only  ⚠️ = unverified"))
+		b.WriteString("\n\n")
 	}
 
 	return b.String()

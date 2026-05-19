@@ -2,6 +2,9 @@ package bakery
 
 import (
 	"context"
+	"crypto/sha512"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -224,4 +227,69 @@ func TestFallbackToPackageListWhenNoSBOM(t *testing.T) {
 	if info.Kernel != "6.12.81" {
 		t.Errorf("fallback failed: kernel got %q, want %q", info.Kernel, "6.12.81")
 	}
+}
+
+func TestVerifySHA512(t *testing.T) {
+	content := "hello world"
+	// Pre-computed SHA512 of "hello world"
+	digest := "# SHA512 HASH\n309ecc489c12d6eb4cc40f50c902f2b4d0ed77ee511a7c7a9bcd3ca86d4cd86f989dd35bc5ff499670da34255b45b0cfd830e81f605dcf7dc5542e93ae9cd76f  test.txt\n"
+
+	if !verifySHA512(content, digest) {
+		t.Error("expected SHA512 verification to pass for known hash")
+	}
+
+	if verifySHA512("wrong content", digest) {
+		t.Error("expected SHA512 verification to fail for wrong content")
+	}
+
+	if verifySHA512(content, "# SHA512 HASH\ndeadbeef  test.txt\n") {
+		t.Error("expected SHA512 verification to fail for wrong hash")
+	}
+}
+
+func TestVerificationStatusInChannelInfo(t *testing.T) {
+	// When SBOM + digest are both served, verification flags should be set
+	mux := http.NewServeMux()
+	mux.HandleFunc("/version.txt", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(mockVersionTxt))
+	})
+	sbomContent := mockSBOMJSON
+	mux.HandleFunc("/flatcar_production_image_sbom.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(sbomContent))
+	})
+	mux.HandleFunc("/flatcar_production_image_sbom.json.DIGESTS", func(w http.ResponseWriter, r *http.Request) {
+		// Compute real SHA512 of the SBOM content
+		hash := sha512Hash(sbomContent)
+		fmt.Fprintf(w, "# SHA512 HASH\n%s  flatcar_production_image_sbom.json\n", hash)
+	})
+	mux.HandleFunc("/flatcar_production_image_sbom.json.DIGESTS.asc", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("-----BEGIN PGP SIGNED MESSAGE-----\nfake\n"))
+	})
+	mux.HandleFunc("/flatcar_production_image_packages.txt", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not used", 404)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	info, err := fetchChannelInfoFromURLs(context.Background(), "stable",
+		srv.URL+"/version.txt",
+		srv.URL+"/flatcar_production_image_packages.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !info.SBOMVerified {
+		t.Error("SBOMVerified should be true")
+	}
+	if !info.DigestVerified {
+		t.Error("DigestVerified should be true")
+	}
+	if !info.SignedDigest {
+		t.Error("SignedDigest should be true")
+	}
+}
+
+func sha512Hash(content string) string {
+	h := sha512.Sum512([]byte(content))
+	return hex.EncodeToString(h[:])
 }
