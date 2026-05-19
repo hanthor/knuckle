@@ -91,8 +91,13 @@ func (i *FlatcarInstaller) Install(ctx context.Context, cfg *model.InstallConfig
 }
 
 func buildInstallArgs(cfg *model.InstallConfig, ignitionJSON string) []string {
+	// Prefer /dev/disk/by-id path for stable identification
+	diskPath := cfg.Disk.Path
+	if diskPath == "" {
+		diskPath = cfg.Disk.DevPath
+	}
 	args := []string{
-		"-d", cfg.Disk.DevPath,
+		"-d", diskPath,
 		"-C", cfg.Channel,
 	}
 

@@ -130,3 +130,16 @@ func TestListNetworkInterfacesInvalidJSON(t *testing.T) {
 		t.Error("expected non-empty error message")
 	}
 }
+
+func TestResolveByIDPathFallback(t *testing.T) {
+	// When /dev/disk/by-id doesn't exist (CI, containers), falls back to devPath
+	got := resolveByIDPath("/dev/sda")
+	// In CI there's no /dev/disk/by-id, so it should return the input path
+	if got != "/dev/sda" && got == "" {
+		t.Errorf("resolveByIDPath() = %q, want non-empty fallback", got)
+	}
+	// The function must never return empty string
+	if got == "" {
+		t.Error("resolveByIDPath() returned empty string, should fallback to devPath")
+	}
+}

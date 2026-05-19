@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/castrojo/knuckle/internal/model"
 	"github.com/castrojo/knuckle/internal/runner"
@@ -98,12 +100,7 @@ func (p *SystemProber) ListDisks(ctx context.Context) ([]model.DiskInfo, error) 
 		}
 
 		// Resolve /dev/disk/by-id path for stable identification
-		if dev.Serial != nil && *dev.Serial != "" {
-			byIDPath := resolveByIDPath(ctx, p.Runner, dev.Name)
-			if byIDPath != "" {
-				disk.Path = byIDPath
-			}
-		}
+		disk.Path = resolveByIDPath(disk.DevPath)
 
 		// Parse partitions from children
 		for _, child := range dev.Children {
@@ -210,19 +207,26 @@ func humanSize(bytes uint64) string {
 	}
 }
 
-// resolveByIDPath finds the /dev/disk/by-id/ symlink for a device.
-func resolveByIDPath(ctx context.Context, r runner.Runner, devName string) string {
-	result, err := r.Run(ctx, "find", "/dev/disk/by-id/", "-lname", fmt.Sprintf("*/%s", devName), "-print", "-quit")
-	if err != nil || result.ExitCode != 0 {
-		return ""
+// resolveByIDPath finds the /dev/disk/by-id/ symlink for a device path.
+// Falls back to devPath if /dev/disk/by-id is unavailable (e.g., in CI).
+func resolveByIDPath(devPath string) string {
+	byIDDir := "/dev/disk/by-id/"
+	entries, err := os.ReadDir(byIDDir)
+	if err != nil {
+		return devPath // fallback to raw device path
 	}
-	path := result.Stdout
-	if path == "" {
-		return ""
+	for _, entry := range entries {
+		link := filepath.Join(byIDDir, entry.Name())
+		target, err := os.Readlink(link)
+		if err != nil {
+			continue
+		}
+		// Resolve relative symlink
+		absTarget := filepath.Join(byIDDir, target)
+		absTarget, _ = filepath.Abs(absTarget)
+		if absTarget == devPath {
+			return link
+		}
 	}
-	// Trim trailing newline
-	if path[len(path)-1] == '\n' {
-		path = path[:len(path)-1]
-	}
-	return path
+	return devPath
 }

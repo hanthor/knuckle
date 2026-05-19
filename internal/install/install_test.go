@@ -225,6 +225,18 @@ func TestBuildInstallArgs(t *testing.T) {
 			ignitionJSON: "",
 			want:         []string{"-d", "/dev/vda", "-C", "beta"},
 		},
+		{
+			name: "prefers by-id path over devpath",
+			cfg: &model.InstallConfig{
+				Channel: "stable",
+				Disk: model.DiskInfo{
+					DevPath: "/dev/sda",
+					Path:    "/dev/disk/by-id/ata-Samsung_SSD_870_S5PXNG0R312345",
+				},
+			},
+			ignitionJSON: `{"ignition":{}}`,
+			want:         []string{"-d", "/dev/disk/by-id/ata-Samsung_SSD_870_S5PXNG0R312345", "-C", "stable", "-i", "/tmp/knuckle-ignition.json"},
+		},
 	}
 
 	for _, tt := range tests {
