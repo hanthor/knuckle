@@ -172,7 +172,7 @@ func (m *Model) buildUserForm() *huh.Form {
 		huh.NewGroup(
 			huh.NewNote().
 				Title("Authentication").
-				Description("Set up SSH access. Enter a GitHub username to fetch your\npublic keys automatically, or paste a key directly."),
+				Description("Set up SSH access. Your local SSH keys (~/.ssh/*.pub) are\nincluded automatically. Add a GitHub username to fetch additional\nkeys, or paste one directly."),
 			huh.NewInput().
 				Title("GitHub Username").
 				Description("Fetches your SSH public keys automatically").
@@ -182,8 +182,20 @@ func (m *Model) buildUserForm() *huh.Form {
 				Title("SSH Public Key").
 				Description("Or paste key directly (separate multiple with ;)").
 				Value(&m.sshKeyInput),
+			huh.NewNote().
+				Title("").
+				Description(m.localKeysSummary()),
 		),
 	).WithTheme(huh.ThemeDracula()).WithShowHelp(true).WithWidth(80)
+}
+
+// localKeysSummary returns a description showing detected local SSH keys.
+func (m *Model) localKeysSummary() string {
+	keys := detectLocalSSHKeys()
+	if len(keys) == 0 {
+		return "⚠ No local SSH keys found in ~/.ssh/"
+	}
+	return fmt.Sprintf("🔑 %d local key(s) from ~/.ssh/ will be included automatically", len(keys))
 }
 
 // buildReviewForm creates the huh confirm for the Review step.
@@ -278,17 +290,17 @@ func (m *Model) renderZenChrome() string {
 	// Logo: spaced letterform in double-line frame
 	b.WriteString(logoLo.Render("\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557"))
 	b.WriteString("\n")
-	b.WriteString(logoLo.Render("\u2551") + "    " + logoHi.Render("K N U C K L E") + "                                       " + logoLo.Render("\u2551"))
+	b.WriteString(logoLo.Render("\u2551") + "     " + logoHi.Render("K N U C K L E") + "                                       " + logoLo.Render("\u2551"))
 	b.WriteString("\n")
 	b.WriteString(logoLo.Render("\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d"))
 	b.WriteString("\n")
 
 	// Subtitle + slogan
 	b.WriteString("  ")
-	b.WriteString(accentColor.Render("bare-metal Flatcar Container Linux installer"))
+	b.WriteString(accentColor.Render("homelab ignition configurator"))
 	b.WriteString("\n")
 	b.WriteString("  ")
-	b.WriteString(sloganStyle.Render("Flatcar comes to the homelab, legends will rise ..."))
+	b.WriteString(sloganStyle.Render("The real thing, right from the CNCF. Legends will rise."))
 	b.WriteString("\n\n")
 
 	// Info line: version + system dots (skip on Welcome — cards show it)
@@ -499,7 +511,7 @@ func (m *Model) viewChannelCards() string {
 	// Show advanced hint
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
-		"  Ctrl+A advanced options · ↑↓ select · enter continue"))
+		"  Ctrl+A advanced options · ↑↓/jk select · enter continue"))
 	b.WriteString("\n")
 
 	return b.String()

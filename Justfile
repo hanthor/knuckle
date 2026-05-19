@@ -1,71 +1,15 @@
 # Knuckle — Flatcar Container Linux TUI Installer
 # https://github.com/castrojo/knuckle
 
-QEMU := if path_exists("/home/linuxbrew/.linuxbrew/bin/qemu-system-x86_64") == "true" { "/home/linuxbrew/.linuxbrew/bin/qemu-system-x86_64" } else { "/usr/bin/qemu-system-x86_64" }
+QEMU := if path_exists("/home/linuxbrew/.linuxbrew/bin/qemu-system-x86_64") == "true" { "/home/linuxbrew/.linuxbrew/bin/qemu-system-x86_64" } else { "qemu-system-x86_64" }
+SSH_OPTS := "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 
 default:
     @just --list
 
-# Build and boot installer VM — knuckle launches automatically on serial console
-vm:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "Building knuckle..."
-    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/knuckle-linux-amd64 ./cmd/knuckle
-
-    mkdir -p .vm
-    if [ ! -f ".vm/flatcar_base.img" ]; then
-        echo "Downloading Flatcar stable QEMU image..."
-        curl -L -o .vm/flatcar_base.img.bz2 \
-            "https://stable.release.flatcar-linux.net/amd64-usr/current/flatcar_production_qemu_image.img.bz2"
-        bunzip2 .vm/flatcar_base.img.bz2
-    fi
-
-    # Kill any running VM first
-    if [ -f .vm/qemu.pid ]; then
-        kill "$(cat .vm/qemu.pid)" 2>/dev/null || true
-        rm -f .vm/qemu.pid
-        sleep 1
-    fi
-
-    # Fresh disks every boot (Ignition only runs on first boot)
-    rm -f .vm/boot.img .vm/target.qcow2
-    cp .vm/flatcar_base.img .vm/boot.img
-    qemu-img create -f qcow2 .vm/target.qcow2 20G
-
-    # Tiny Ignition: SSH key + autologin runs knuckle on serial console
-    SSH_KEY=$(cat ~/.ssh/id_ed25519.pub)
-    printf '{"ignition":{"version":"3.3.0"},"passwd":{"users":[{"name":"core","sshAuthorizedKeys":["%s"]}]},"systemd":{"units":[{"name":"sshd.service","enabled":true},{"name":"serial-getty@ttyS0.service","dropins":[{"name":"autologin.conf","contents":"[Service]\\nExecStart=\\nExecStart=-/sbin/agetty --autologin core --noclear %%I 115200 linux"}]}]}}' "$SSH_KEY" > .vm/config.ign
-
-    echo "Booting VM (waiting for SSH)..."
-    {{QEMU}} \
-        -m 2048 -smp 2 -enable-kvm \
-        -drive if=virtio,file=.vm/boot.img,format=qcow2 \
-        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
-        -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/config.ign \
-        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
-        -display none -daemonize -serial file:.vm/serial.log \
-        -pidfile .vm/qemu.pid
-
-    # Wait for SSH
-    for i in $(seq 1 30); do
-        if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=2 -p 2222 core@127.0.0.1 true 2>/dev/null; then
-            break
-        fi
-        sleep 2
-    done
-
-    echo "Deploying knuckle..."
-    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 \
-        bin/knuckle-linux-amd64 core@127.0.0.1:/tmp/knuckle 2>/dev/null
-
-    echo "Launching installer..."
-    exec ssh -t -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 \
-        core@127.0.0.1 '/tmp/knuckle --dry-run'
-
-# SSH into the running VM
-ssh:
-    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 core@127.0.0.1
+# Build the binary
+build:
+    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/knuckle ./cmd/knuckle
 
 # Run tests
 test:
@@ -76,110 +20,145 @@ ci:
     go mod tidy
     golangci-lint run ./...
     go test -race ./...
-    go build -o bin/knuckle ./cmd/knuckle
-
-# Build a self-contained installer disk image (requires virt-customize)
-installer-disk:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "Building knuckle..."
-    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/knuckle-linux-amd64 ./cmd/knuckle
-
-    mkdir -p .vm output
-    if [ ! -f ".vm/flatcar_base.img" ]; then
-        echo "Downloading Flatcar stable QEMU image..."
-        curl -L -o .vm/flatcar_base.img.bz2 \
-            "https://stable.release.flatcar-linux.net/amd64-usr/current/flatcar_production_qemu_image.img.bz2"
-        bunzip2 .vm/flatcar_base.img.bz2
-    fi
-
-    echo "Creating installer disk..."
-    rm -f output/knuckle-installer.qcow2
-    cp .vm/flatcar_base.img output/knuckle-installer.qcow2
-
-    if ! command -v virt-customize &>/dev/null; then
-        echo "❌ virt-customize not found."
-        echo "Install: sudo dnf install libguestfs-tools"
-        exit 1
-    fi
-
-    virt-customize -a output/knuckle-installer.qcow2 \
-        --upload bin/knuckle-linux-amd64:/opt/knuckle \
-        --chmod 0755:/opt/knuckle \
-        --write '/etc/systemd/system/knuckle-installer.service:[Unit]\nDescription=Knuckle Flatcar Installer\nAfter=multi-user.target\nConditionPathExists=/opt/knuckle\n\n[Service]\nType=idle\nExecStart=/opt/knuckle\nStandardInput=tty\nStandardOutput=tty\nTTYPath=/dev/tty1\nTTYReset=yes\nTTYVHangup=yes\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=multi-user.target' \
-        --mkdir /etc/systemd/system/multi-user.target.wants \
-        --link '/etc/systemd/system/multi-user.target.wants/knuckle-installer.service:/etc/systemd/system/knuckle-installer.service'
-
-    echo "✅ Installer image: output/knuckle-installer.qcow2 ($(du -h output/knuckle-installer.qcow2 | cut -f1))"
-    echo ""
-    echo "Boot with:"
-    echo "  qemu-system-x86_64 -m 2048 -enable-kvm -drive if=virtio,file=output/knuckle-installer.qcow2"
-
-# Boot the installer disk image (builds if needed, adds a target disk for installation)
-boot-installer: installer-disk
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p .vm
-    [ -f .vm/target.qcow2 ] || qemu-img create -f qcow2 .vm/target.qcow2 20G
-    {{QEMU}} \
-        -m 2048 -smp 2 -enable-kvm \
-        -drive if=virtio,file=output/knuckle-installer.qcow2,format=qcow2 \
-        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
-        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
-        -nographic
-
-# Clean everything
-clean:
-    #!/usr/bin/env bash
-    if [ -f .vm/qemu.pid ]; then kill "$(cat .vm/qemu.pid)" 2>/dev/null || true; fi
-    rm -rf bin/ .vm/
-
-# Run E2E test: install to disk + boot + verify
-e2e:
-    ./scripts/e2e-test.sh
+    just build
 
 # Quick headless dry-run test (no VM needed)
 headless-test:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Building..."
-    go build -o bin/knuckle ./cmd/knuckle
+    just build
     cat > /tmp/knuckle-test-config.json <<'EOF'
     {"channel":"stable","hostname":"test-node","timezone":"UTC","network":{"mode":"dhcp"},"users":[{"username":"core","ssh_keys":["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test"]}],"disk":"/dev/vdb","update_strategy":"reboot","reboot":false}
     EOF
-    echo "Running headless dry-run..."
     bin/knuckle --config /tmp/knuckle-test-config.json --headless --dry-run
-    echo "PASS"
+    echo "✅ PASS"
 
-# Boot the installed target disk (after e2e or manual install)
+# Boot VM and launch knuckle TUI (interactive over SSH)
+vm *FLAGS='--dry-run':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build
+    just _ensure-base
+    just _kill-vm
+
+    rm -f .vm/boot.qcow2 .vm/target.qcow2
+    qemu-img create -f qcow2 -b flatcar_base.img -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
+    just _write-ignition
+
+    {{QEMU}} \
+        -m 2048 -smp 2 -enable-kvm \
+        -drive if=virtio,file=.vm/boot.qcow2,format=qcow2 \
+        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
+        -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/config.ign \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid
+
+    echo "Waiting for VM..."
+    for i in $(seq 1 20); do
+        ssh {{SSH_OPTS}} -o ConnectTimeout=2 -p 2222 core@127.0.0.1 true 2>/dev/null && break
+        sleep 2
+    done
+
+    scp {{SSH_OPTS}} -P 2222 bin/knuckle core@127.0.0.1:/tmp/knuckle 2>/dev/null
+    exec ssh -t {{SSH_OPTS}} -p 2222 core@127.0.0.1 "sudo /tmp/knuckle {{FLAGS}} --log-file /tmp/knuckle.log"
+
+# Boot VM in background, get a shell (knuckle already deployed)
+vm-ssh *FLAGS='--dry-run':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build
+    just _ensure-base
+    just _kill-vm
+
+    rm -f .vm/boot.qcow2 .vm/target.qcow2
+    qemu-img create -f qcow2 -b flatcar_base.img -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
+    just _write-ignition
+
+    {{QEMU}} \
+        -m 2048 -smp 2 -enable-kvm \
+        -drive if=virtio,file=.vm/boot.qcow2,format=qcow2 \
+        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
+        -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/config.ign \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid
+
+    echo "Waiting for VM..."
+    for i in $(seq 1 30); do
+        ssh {{SSH_OPTS}} -o ConnectTimeout=2 -p 2222 core@127.0.0.1 true 2>/dev/null && break
+        sleep 2
+    done
+
+    scp {{SSH_OPTS}} -P 2222 bin/knuckle core@127.0.0.1:/tmp/knuckle 2>/dev/null
+    echo "VM ready. Binary at /tmp/knuckle. Run: sudo /tmp/knuckle {{FLAGS}}"
+    exec ssh -t {{SSH_OPTS}} -p 2222 core@127.0.0.1
+
+# SSH into running VM
+ssh:
+    ssh -t {{SSH_OPTS}} -p 2222 core@127.0.0.1
+
+# Boot the installed target disk to verify installation worked
 boot-target:
     #!/usr/bin/env bash
     set -euo pipefail
-    [ -f .vm/qemu.pid ] && kill "$(cat .vm/qemu.pid)" 2>/dev/null || true
-    rm -f .vm/qemu.pid
-    sleep 1
+    just _kill-vm
+    [ -f .vm/target.qcow2 ] || { echo "No target disk. Run 'just vm' first."; exit 1; }
+    echo "Booting installed target disk..."
+    echo "  → Ctrl-a x to quit QEMU"
     {{QEMU}} \
         -m 2048 -smp 2 -enable-kvm \
         -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
         -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
-        -display none -daemonize -pidfile .vm/qemu.pid
-    echo "Booting installed system..."
-    for i in $(seq 1 20); do
-        if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=2 -p 2222 core@127.0.0.1 true 2>/dev/null; then
-            echo "Ready. SSH: ssh -p 2222 core@127.0.0.1"
-            break
-        fi
-        sleep 2
-    done
+        -nographic
 
-# Launch live install in Ghostty (no --dry-run)
-vm-live:
+# Run E2E test: install to disk + boot + verify
+e2e:
+    ./scripts/e2e-test.sh
+
+# Stop running VM
+stop:
+    just _kill-vm
+
+# Clean everything
+clean:
+    #!/usr/bin/env bash
+    just _kill-vm 2>/dev/null || true
+    rm -rf bin/ .vm/
+
+# --- Internal helpers (not listed) ---
+
+[private]
+_ensure-base:
+    #!/usr/bin/env bash
+    mkdir -p .vm
+    if [ ! -f ".vm/flatcar_base.img" ]; then
+        echo "Downloading Flatcar stable QEMU image (one-time)..."
+        curl -L -o .vm/flatcar_base.img.bz2 \
+            "https://stable.release.flatcar-linux.net/amd64-usr/current/flatcar_production_qemu_image.img.bz2"
+        bunzip2 .vm/flatcar_base.img.bz2
+    fi
+
+[private]
+_kill-vm:
+    #!/usr/bin/env bash
+    if [ -f .vm/qemu.pid ]; then
+        kill "$(cat .vm/qemu.pid)" 2>/dev/null || true
+        rm -f .vm/qemu.pid
+        sleep 1
+    fi
+
+[private]
+_write-ignition:
     #!/usr/bin/env bash
     set -euo pipefail
-    just vm &
-    VM_PID=$!
-    sleep 30  # wait for VM boot
-    kill $VM_PID 2>/dev/null || true
-    # Relaunch without --dry-run
-    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 core@127.0.0.1 "pkill knuckle" 2>/dev/null || true
-    exec ssh -t -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 core@127.0.0.1 'sudo /tmp/knuckle --log-file /tmp/knuckle.log'
+    SSH_KEY=$(cat ~/.ssh/id_ed25519.pub)
+    cat > .vm/config.ign <<EOF
+    {
+      "ignition": {"version": "3.4.0"},
+      "passwd": {"users": [{"name": "core", "sshAuthorizedKeys": ["$SSH_KEY"]}]},
+      "systemd": {"units": [
+        {"name": "sshd.service", "enabled": true}
+      ]}
+    }
+    EOF

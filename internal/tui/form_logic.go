@@ -100,15 +100,17 @@ func (m *Model) onFormComplete() tea.Cmd {
 			}
 			cfg.Users[0].PasswordHash = hash
 		}
-		// Apply SSH key
-		if m.sshKeyInput != "" {
-			keys := splitSSHKeys(m.sshKeyInput)
-			cfg.SSHKeys = keys
+		// Apply SSH key (manual input + local host keys)
+		manualKeys := splitSSHKeys(m.sshKeyInput)
+		localKeys := detectLocalSSHKeys()
+		allKeys := mergeKeys(localKeys, manualKeys)
+		if len(allKeys) > 0 {
+			cfg.SSHKeys = allKeys
 			if len(cfg.Users) > 0 {
-				cfg.Users[0].SSHKeys = keys
+				cfg.Users[0].SSHKeys = allKeys
 			}
 		}
-		// Async GitHub key fetch
+		// Async GitHub key fetch (merges with local keys on return)
 		if m.githubUserInput != "" {
 			m.fetching = true
 			username := m.githubUserInput

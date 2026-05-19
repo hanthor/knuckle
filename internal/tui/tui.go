@@ -3,7 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -129,8 +131,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle advanced mode on Welcome step
 			if m.Wizard.State.CurrentStep == model.StepWelcome {
 				m.showAdvanced = !m.showAdvanced
-				m.initForm()
-				return m, m.activeForm.Init()
+				return m, nil
 			}
 		}
 		m.confirmQuit = false
@@ -178,9 +179,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		cfg := &m.Wizard.State.Config
-		cfg.SSHKeys = msg.keys
+		// Merge GitHub keys with local host keys (deduped)
+		allKeys := mergeKeys(detectLocalSSHKeys(), msg.keys)
+		cfg.SSHKeys = allKeys
 		if len(cfg.Users) > 0 {
-			cfg.Users[0].SSHKeys = msg.keys
+			cfg.Users[0].SSHKeys = allKeys
 		}
 		if err := m.Wizard.Next(); err != nil {
 			m.err = err
@@ -278,7 +281,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		m.confirmQuit = false
 		return m.handleEnter()
-	case "tab", "down":
+	case "tab", "down", "j":
 		m.confirmQuit = false
 		if len(m.fields) > 0 {
 			m.fieldIdx = (m.fieldIdx + 1) % len(m.fields)
@@ -294,7 +297,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case "shift+tab", "up":
+	case "shift+tab", "up", "k":
 		if len(m.fields) > 0 {
 			m.fieldIdx--
 			if m.fieldIdx < 0 {
@@ -583,11 +586,8 @@ func (m *Model) initStepFields() {
 	m.fieldIdx = 0
 	switch m.Wizard.State.CurrentStep {
 	case model.StepWelcome:
-		m.fields = []field{
-			{label: "Channel (stable/beta/alpha/edge)", key: "channel", value: m.Wizard.State.Config.Channel},
-			{label: "Version (blank = latest)", key: "version", value: m.Wizard.State.Config.Version},
-			{label: "External Ignition URL (skip wizard)", key: "ignition_url", value: m.Wizard.State.Config.IgnitionURL},
-		}
+		// Card-based channel selector — no text fields
+		m.fields = nil
 	case model.StepNetwork:
 		m.fields = []field{
 			{label: "Interface", key: "interface", value: m.Wizard.State.Config.Network.Interface},
@@ -658,7 +658,7 @@ func (m *Model) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑/↓ navigate • enter confirm • esc back • q quit"))
+	b.WriteString(helpStyle.Render("↑↓/jk navigate • enter confirm • esc back • q quit"))
 	return b.String()
 }
 
@@ -1012,4 +1012,49 @@ func splitSSHKeys(input string) []string {
 		}
 	}
 	return keys
+}
+
+// detectLocalSSHKeys finds SSH public keys on the installer host.
+// Checks ~/.ssh/*.pub for common key types.
+func detectLocalSSHKeys() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	pattern := filepath.Join(home, ".ssh", "*.pub")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil
+	}
+	var keys []string
+	for _, path := range matches {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		key := strings.TrimSpace(string(data))
+		if strings.HasPrefix(key, "ssh-") || strings.HasPrefix(key, "ecdsa-") || strings.HasPrefix(key, "sk-") {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// mergeKeys combines two key slices, deduplicating by key content.
+func mergeKeys(a, b []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, k := range a {
+		if !seen[k] {
+			seen[k] = true
+			result = append(result, k)
+		}
+	}
+	for _, k := range b {
+		if !seen[k] {
+			seen[k] = true
+			result = append(result, k)
+		}
+	}
+	return result
 }
