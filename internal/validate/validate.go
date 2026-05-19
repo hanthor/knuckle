@@ -139,6 +139,31 @@ func NonEmpty(field, value string) error {
 	return nil
 }
 
+// Timezone validates a timezone string (e.g. "America/New_York").
+// Empty is OK (defaults to UTC).
+func Timezone(tz string) error {
+	if tz == "" {
+		return nil // empty is OK, defaults to UTC
+	}
+	matched, _ := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_/+-]*$`, tz)
+	if !matched {
+		return fmt.Errorf("invalid timezone %q: must match [A-Za-z_][A-Za-z0-9_/+-]*", tz)
+	}
+	return nil
+}
+
+// GroupName validates a Linux group name.
+func GroupName(name string) error {
+	if name == "" {
+		return fmt.Errorf("group name cannot be empty")
+	}
+	matched, _ := regexp.MatchString(`^[a-z_][a-z0-9_-]*$`, name)
+	if !matched {
+		return fmt.Errorf("invalid group name %q: must match [a-z_][a-z0-9_-]*", name)
+	}
+	return nil
+}
+
 // InterfaceName validates a Linux network interface name.
 // Must be 1-15 characters, alphanumeric plus dots, hyphens, underscores.
 // No path traversal or special characters.

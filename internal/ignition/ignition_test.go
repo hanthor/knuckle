@@ -439,3 +439,28 @@ func TestGenerateButaneTimezoneAndSysexts(t *testing.T) {
 		t.Error("missing timezone link target")
 	}
 }
+
+func TestYamlEscapeNewlines(t *testing.T) {
+	g := NewGenerator()
+
+	cfg := &model.InstallConfig{
+		Hostname: "test\nhost",
+		Users: []model.UserConfig{
+			{Username: "user", SSHKeys: []string{"ssh-ed25519 AAAA"}, Groups: []string{"docker"}},
+		},
+		SSHKeys: []string{"ssh-ed25519 AAAA"},
+	}
+
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The hostname should have escaped newline, not a literal one
+	if strings.Contains(output, "test\nhost") {
+		t.Error("literal newline found in output — yamlEscape should escape \\n")
+	}
+	if !strings.Contains(output, `test\nhost`) {
+		t.Error("expected escaped \\n sequence in output")
+	}
+}

@@ -34,6 +34,9 @@ func (g *Generator) GenerateButane(cfg *model.InstallConfig) (string, error) {
 		"yamlEscape": func(s string) string {
 			s = strings.ReplaceAll(s, `\`, `\\`)
 			s = strings.ReplaceAll(s, `"`, `\"`)
+			s = strings.ReplaceAll(s, "\n", `\n`)
+			s = strings.ReplaceAll(s, "\r", `\r`)
+			s = strings.ReplaceAll(s, "\t", `\t`)
 			return s
 		},
 	}

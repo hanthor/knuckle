@@ -245,3 +245,59 @@ func TestNonEmpty(t *testing.T) {
 		})
 	}
 }
+
+func TestTimezone(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"empty is OK", "", false},
+		{"valid US", "America/New_York", false},
+		{"valid Europe", "Europe/Berlin", false},
+		{"valid UTC", "UTC", false},
+		{"valid offset style", "Etc/GMT+5", false},
+		{"valid underscore", "America/North_Dakota/Center", false},
+		{"invalid space", "America/New York", true},
+		{"invalid newline", "America\n/New_York", true},
+		{"invalid semicolon", "UTC;rm -rf /", true},
+		{"starts with number", "1UTC", true},
+		{"starts with slash", "/etc/localtime", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Timezone(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Timezone(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGroupName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid simple", "docker", false},
+		{"valid with underscore", "wheel_users", false},
+		{"valid with hyphen", "libvirt-users", false},
+		{"valid starts underscore", "_shadow", false},
+		{"empty", "", true},
+		{"starts with number", "1docker", true},
+		{"starts with hyphen", "-docker", true},
+		{"uppercase", "Docker", true},
+		{"has space", "my group", true},
+		{"has newline", "group\nname", true},
+		{"special chars", "group;rm", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := GroupName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GroupName(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
