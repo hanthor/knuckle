@@ -27,6 +27,12 @@ func (m *Model) initForm() {
 		if m.usernameInput == "" {
 			m.usernameInput = "core"
 		}
+		if m.Wizard.State.Config.Hostname == "" {
+			m.Wizard.State.Config.Hostname = "flatcar"
+		}
+		if m.Wizard.State.Config.Timezone == "" {
+			m.Wizard.State.Config.Timezone = "UTC"
+		}
 		m.activeForm = m.buildUserForm()
 	case model.StepReview:
 		m.activeForm = m.buildReviewForm()

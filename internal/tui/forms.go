@@ -14,51 +14,74 @@ import (
 // buildWelcomeForm creates the huh form for the Welcome step.
 func (m *Model) buildWelcomeForm() *huh.Form {
 	channels := []huh.Option[string]{
-		huh.NewOption("stable", "stable"),
-		huh.NewOption("beta", "beta"),
-		huh.NewOption("alpha", "alpha"),
-		huh.NewOption("lts", "lts"),
-		huh.NewOption("edge", "edge"),
+		huh.NewOption("stable — recommended for production", "stable"),
+		huh.NewOption("lts — long-term support", "lts"),
+		huh.NewOption("beta — next stable candidate", "beta"),
+		huh.NewOption("alpha — bleeding edge", "alpha"),
+		huh.NewOption("edge — nightly builds", "edge"),
 	}
 
-	return huh.NewForm(
-		huh.NewGroup(
-			huh.NewNote().
-				Title("Welcome to Knuckle").
-				Description("This wizard will install Flatcar Container Linux on your system.\nIt will configure networking, users, and write the OS to disk."),
-			huh.NewSelect[string]().
-				Title("Release Channel").
-				Description("Choose the Flatcar release channel for this installation").
-				Options(channels...).
-				Value(&m.Wizard.State.Config.Channel),
+	helpText := "This wizard will install Flatcar Container Linux on your system.\nIt will configure networking, users, and write the OS to disk.\n\nPress Ctrl+A for advanced options."
+	if m.showAdvanced {
+		helpText = "Advanced mode enabled. Press Ctrl+A to hide.\n\nVersion pinning installs a specific Flatcar release.\nExternal Ignition URL skips the wizard entirely."
+	}
+
+	fields := []huh.Field{
+		huh.NewNote().
+			Title("Welcome to Knuckle").
+			Description(helpText),
+		huh.NewSelect[string]().
+			Title("Release Channel").
+			Description("Choose the update track for this machine").
+			Options(channels...).
+			Value(&m.Wizard.State.Config.Channel),
+	}
+
+	if m.showAdvanced {
+		fields = append(fields,
 			huh.NewInput().
-				Title("Version").
-				Description("Leave blank for latest").
-				Placeholder("e.g. 4593.2.1").
+				Title("Version Pin").
+				Description("Install a specific version instead of latest").
+				Placeholder("e.g. 4593.2.1 or current-2024 for LTS").
 				Value(&m.Wizard.State.Config.Version),
 			huh.NewInput().
 				Title("External Ignition URL").
-				Description("Skip wizard — pass URL directly to flatcar-install").
+				Description("Skip wizard — pass this URL directly to flatcar-install").
 				Placeholder("https://example.com/config.ign").
 				Value(&m.Wizard.State.Config.IgnitionURL),
-		),
+		)
+	}
+
+	return huh.NewForm(
+		huh.NewGroup(fields...),
 	).WithTheme(huh.ThemeDracula()).WithShowHelp(true)
 }
 
 // buildNetworkForm creates the huh form for the Network step.
 func (m *Model) buildNetworkForm() *huh.Form {
+	// Show detected interfaces in the description
+	ifaceDesc := "Network interface for static config"
+	if len(m.Wizard.State.Interfaces) > 0 {
+		var names []string
+		for _, iface := range m.Wizard.State.Interfaces {
+			names = append(names, iface.Name)
+		}
+		ifaceDesc = fmt.Sprintf("Detected: %s", strings.Join(names, ", "))
+	}
+
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewNote().
 				Title("Network Configuration").
-				Description("Configure networking for this machine.\nLeave all fields blank for DHCP (recommended for most setups)."),
+				Description("Configure networking for this machine.\nLeave all fields blank for DHCP (recommended for most setups).\n\nCommon static configurations:\n  • Home server: 192.168.1.100/24, gateway 192.168.1.1, DNS 1.1.1.1\n  • Office/VLAN: 10.0.1.50/24, gateway 10.0.1.1, DNS 10.0.1.1\n  • Lab network: 172.16.0.10/16, gateway 172.16.0.1, DNS 8.8.8.8"),
 			huh.NewInput().
 				Title("Interface").
-				Description("Network interface for static config").
+				Description(ifaceDesc).
 				Placeholder("eth0").
 				Value(&m.Wizard.State.Config.Network.Interface),
 			huh.NewInput().
 				Title("IP Address (CIDR)").
+				Description("Include subnet mask, e.g. /24 = 255.255.255.0").
 				Placeholder("192.168.1.100/24").
 				Value(&m.Wizard.State.Config.Network.Address).
 				Validate(func(s string) error {
@@ -79,7 +102,7 @@ func (m *Model) buildNetworkForm() *huh.Form {
 				}),
 			huh.NewInput().
 				Title("DNS Servers").
-				Description("Comma-separated").
+				Description("Comma-separated. Common: 1.1.1.1 (Cloudflare), 8.8.8.8 (Google)").
 				Placeholder("1.1.1.1,8.8.8.8").
 				Value(&m.dnsInput),
 		),

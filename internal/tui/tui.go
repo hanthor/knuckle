@@ -53,12 +53,13 @@ type Model struct {
 	fieldIdx    int
 
 	// huh form state
-	activeForm    *huh.Form
-	dnsInput      string
-	usernameInput string
-	passwordInput string
+	activeForm      *huh.Form
+	dnsInput        string
+	usernameInput   string
+	passwordInput   string
 	githubUserInput string
-	sshKeyInput   string
+	sshKeyInput     string
+	showAdvanced    bool
 }
 
 type field struct {
@@ -99,6 +100,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.confirmQuit = true
 			m.err = fmt.Errorf("press Ctrl+C again to quit, or any other key to continue")
 			return m, nil
+		case "ctrl+a":
+			// Toggle advanced mode on Welcome step
+			if m.Wizard.State.CurrentStep == model.StepWelcome {
+				m.showAdvanced = !m.showAdvanced
+				m.initForm()
+				return m, m.activeForm.Init()
+			}
 		}
 		m.confirmQuit = false
 	case tea.WindowSizeMsg:
