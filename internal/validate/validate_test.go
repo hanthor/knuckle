@@ -189,7 +189,7 @@ func TestChannel(t *testing.T) {
 		{"invalid empty", "", true},
 		{"invalid uppercase", "Stable", true},
 		{"invalid unknown", "nightly", true},
-		{"invalid lts", "lts", true},
+		{"valid lts", "lts", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

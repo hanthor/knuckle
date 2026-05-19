@@ -16,6 +16,7 @@ func (m *Model) buildWelcomeForm() *huh.Form {
 		huh.NewOption("stable", "stable"),
 		huh.NewOption("beta", "beta"),
 		huh.NewOption("alpha", "alpha"),
+		huh.NewOption("lts", "lts"),
 		huh.NewOption("edge", "edge"),
 	}
 
@@ -143,6 +144,34 @@ func (m *Model) reviewSummary() string {
 		fmt.Fprintf(&b, "\nSysexts: %s", strings.Join(names, ", "))
 	}
 	return b.String()
+}
+
+// renderProgressBar creates a visual step indicator for the wizard.
+func (m *Model) renderProgressBar() string {
+	steps := []string{"Channel", "Network", "Disk", "User", "Sysext", "Update", "Review", "Install"}
+	current := int(m.Wizard.State.CurrentStep)
+
+	var parts []string
+	for i, name := range steps {
+		if i < current {
+			// Completed
+			parts = append(parts, lipgloss.NewStyle().
+				Foreground(lipgloss.Color("42")).
+				Render("✓ "+name))
+		} else if i == current {
+			// Current
+			parts = append(parts, lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("213")).
+				Render("● "+name))
+		} else {
+			// Future
+			parts = append(parts, lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240")).
+				Render("○ "+name))
+		}
+	}
+	return strings.Join(parts, "  ") + "\n"
 }
 
 // viewWelcomeHeader renders system info above the form.

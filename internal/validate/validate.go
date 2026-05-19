@@ -116,13 +116,13 @@ func DiskPath(s string) error {
 
 // Channel validates a Flatcar release channel.
 func Channel(s string) error {
-	valid := []string{"stable", "beta", "alpha", "edge"}
+	valid := []string{"stable", "beta", "alpha", "lts", "edge"}
 	for _, v := range valid {
 		if s == v {
 			return nil
 		}
 	}
-	return fmt.Errorf("invalid channel %q: must be one of stable, beta, alpha, edge", s)
+	return fmt.Errorf("invalid channel %q: must be one of stable, beta, alpha, lts, edge", s)
 }
 
 // URL validates a basic URL format (must start with http:// or https://).

@@ -69,11 +69,11 @@ func TestFetchAllChannels(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(results) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(results))
+	if len(results) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(results))
 	}
 
-	expected := []string{"stable", "beta", "alpha"}
+	expected := []string{"stable", "beta", "alpha", "lts"}
 	for i, ch := range expected {
 		if results[i].Channel != ch {
 			t.Errorf("results[%d].Channel: got %q, want %q", i, results[i].Channel, ch)

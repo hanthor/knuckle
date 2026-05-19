@@ -73,7 +73,7 @@ func FetchAllChannels(ctx context.Context) ([]ChannelInfo, error) {
 }
 
 func fetchAllChannelsWithURLFn(ctx context.Context, urlFn func(string) (string, string)) ([]ChannelInfo, error) {
-	channels := []string{"stable", "beta", "alpha"}
+	channels := []string{"stable", "beta", "alpha", "lts"}
 	results := make([]ChannelInfo, len(channels))
 	errs := make([]error, len(channels))
 
