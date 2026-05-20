@@ -15,16 +15,17 @@ Flatcar is typically provisioned in cloud environments via Ignition configs. Bar
 ## Features
 
 - **9-step guided wizard** — Welcome → Network → Storage → User → Sysext → Update Strategy → Review → Install → Done
-- **Channel selector with version details** — shows kernel, systemd, docker, containerd, ignition, and etcd versions per channel (sourced from `version.txt`, package lists, and `rootfs-included-sysexts`)
+- **Channel selector with version details** — shows kernel, systemd, docker, containerd, ignition, and etcd versions per channel (sourced from SBOM JSON, `version.txt`, package lists, and `rootfs-included-sysexts`)
 - **Hardware probing** — automatic disk and network interface discovery with `/dev/disk/by-id` path resolution
 - **Network configuration** — DHCP or static IPv4
-- **User setup** — hostname, timezone, password (bcrypt hashed), GitHub SSH key fetching with multi-key support
-- **System extensions** — version-pinned sysext catalog fetched from GitHub Releases API ([flatcar/sysext-bakery](https://github.com/flatcar/sysext-bakery))
+- **User setup** — hostname, timezone, password (bcrypt hashed), GitHub SSH key fetching with multi-key support, local `~/.ssh/*.pub` auto-detection
+- **System extensions** — architecture-aware sysext catalog fetched from GitHub Releases API ([flatcar/sysext-bakery](https://github.com/flatcar/sysext-bakery)), with GPG-verified SHA512 digests
 - **Update strategy** — reboot, off, or etcd-lock options
 - **Review screen** — full Butane YAML preview before install
 - **Install step** — progress bar, wraps `flatcar-install` for disk provisioning
-- **Ignition generation** — produces valid Ignition JSON via Butane (Flatcar variant)
-- **ISO generation** — `internal/iso` package for creating installer ISOs
+- **Ignition generation** — produces valid Ignition JSON via in-process Butane compilation (Flatcar variant, no CLI dependency)
+- **Headless mode** — `--headless --config <file.json>` for automated installs (CI/CD friendly)
+- **Installer ISO** — UEFI-bootable ISO with systemd-boot (amd64 + arm64)
 - **Config validation** — consistency checks before install
 - **Dry-run mode** — `--dry-run` flag skips all disk writes
 - **Ctrl+C double-press** — confirmation before quitting
@@ -33,84 +34,110 @@ Flatcar is typically provisioned in cloud environments via Ignition configs. Bar
 
 | Dimension | Supported |
 |---|---|
-| Architecture | x86_64 |
+| Architecture | x86_64, ARM64 |
 | Storage | Single target disk |
 | Networking | DHCP, static IPv4 |
 | Language | English |
-| Sysexts | Official Flatcar Bakery (via GitHub Releases API) |
-| Config mode | Guided OR external Ignition URL (mutually exclusive) |
+| Sysexts | Official Flatcar Bakery (via GitHub Releases API, arch-aware) |
+| Config mode | Guided OR external Ignition URL (`Ctrl+A`) — mutually exclusive |
 
 ## Quick Start
 
 ```bash
-# Build from source
-go build ./cmd/knuckle
+# Build from source (amd64)
+just build
+
+# Cross-compile for arm64
+just build-arm64
 
 # Run the installer (on a Flatcar live environment)
-./knuckle
+./bin/knuckle
 
 # Dry-run mode (no disk writes)
-./knuckle --dry-run
+./bin/knuckle --dry-run
+
+# Headless install from JSON config
+./bin/knuckle --headless --config install.json
 ```
 
 ## Development
 
 ```bash
-# Build and test
-go build ./cmd/knuckle
-go test -race ./...
-
-# Full CI pipeline (tidy + lint + test + build)
-just ci
-
-# VM testing — boots QEMU with Flatcar, deploys binary, SSH on port 2222
-just vm
-
-# SSH into the running VM
-just ssh
-
-# Build a self-contained installer disk image
-just installer-disk
+just              # list all recipes
+just ci           # full CI: tidy + fmt + vet + lint + vuln + test-race + cover + headless-e2e + build
+just build        # GOOS=linux GOARCH=amd64 CGO_ENABLED=0 → bin/knuckle
+just build-arm64  # cross-compile arm64 → bin/knuckle-arm64
+just test         # go test ./...
+just vuln         # govulncheck ./...
+just cover        # coverage profile + summary
+just cover-check  # per-package coverage threshold gate
+just headless-test  # build + canned JSON config (CI gate, runs on host)
 ```
-
-Requires: Go 1.26+, [just](https://just.systems), [golangci-lint](https://golangci-lint.run)
 
 ### VM Testing
 
-`just vm` downloads a Flatcar stable QEMU image, cross-compiles knuckle for linux/amd64, boots a VM with two disks (boot + target), and launches knuckle over SSH with `--dry-run`. SSH is forwarded on `127.0.0.1:2222`. The TUI requires a PTY (the SSH `-t` flag handles this).
+```bash
+just vm           # real install in QEMU → auto-boots installed system after
+just vm-e2e       # automated: headless install → boot → verify SSH + hostname (3 passes)
+just boot-iso     # build ISO → boot in QEMU GTK window
+just e2e          # build ISO → boot → interactive install
+just ssh          # SSH into running VM
+```
+
+`just vm` downloads a Flatcar stable QEMU image, boots a VM with two disks (boot + target), SCPs the binary in, and launches knuckle over SSH. After install completes, it kills the installer VM and boots from the installed target disk to verify SSH works.
+
+`just vm-e2e` is fully automated — runs 3 passes (DHCP, static network, docker sysext), verifying hostname, OS version, update strategy, and sysext activation on each.
+
+ARM64 VM testing: `KNUCKLE_ARCH=arm64 just vm` (requires native arm64 hardware or QEMU TCG).
+
+Requires: Go 1.26+, [just](https://just.systems), QEMU with KVM
 
 ## Architecture
 
 ```
-cmd/knuckle/         → CLI entrypoint
-internal/bakery/     → sysext catalog client (GitHub Releases API)
-internal/github/     → GitHub API client (SSH keys, releases)
-internal/ignition/   → Butane/Ignition config generation
-internal/install/    → flatcar-install orchestration
-internal/iso/        → ISO image generation
-internal/model/      → shared data model
-internal/probe/      → system probing (lsblk, ip, udevadm)
-internal/runner/     → command execution wrapper (supports --dry-run)
-internal/tui/        → Bubble Tea view models (9 steps)
-internal/validate/   → input and config validation
-internal/wizard/     → step flow state machine
+cmd/knuckle/         → CLI entrypoint, flag parsing, runner wiring
+internal/bakery/     → sysext catalog + Flatcar release/SBOM fetchers, SHA512+GPG verification
+internal/github/     → SSH key fetch + GitHub Releases API client
+internal/headless/   → --headless --config JSON-driven install path
+internal/ignition/   → Butane assembly + in-process Butane→Ignition compilation
+internal/install/    → flatcar-install orchestration via runner
+internal/iso/        → installer ISO builder helpers
+internal/model/      → shared data types (InstallConfig, DiskInfo, NetworkInterface)
+internal/probe/      → lsblk + ip addr JSON parsing, /dev/disk/by-id resolution
+internal/runner/     → Runner interface: RealRunner, DryRunner, SpyRunner
+internal/tui/        → Bubble Tea view models (one sub-model per step)
+internal/validate/   → hostname, CIDR, gateway, SSH key, timezone, disk path validators
+internal/wizard/     → step state machine, navigation, validation gates
 ```
 
 ### Key Design Decisions
 
-- **Sysext catalog** comes from the [flatcar/sysext-bakery](https://github.com/flatcar/sysext-bakery) GitHub Releases API, not from flatcar.org directly
-- **Channel versions** are assembled from three sources: `version.txt` (kernel, systemd), package lists, and `rootfs-included-sysexts` (docker, containerd — these are sysexts since Flatcar 4081+, not base image packages)
-- **Password hashing** uses bcrypt, computed client-side before Ignition generation
+- **Runner abstraction** — every external command goes through `internal/runner.Runner`. Three implementations: `RealRunner` (prod), `DryRunner` (no-op + logging), `SpyRunner` (test recorder). Reboot is injected via `rebootFn`.
+- **Flatcar Butane variant** — `variant: flatcar`, compiled in-process via `github.com/coreos/butane` v0.27+. No `butane` CLI needed on the target system.
+- **Architecture-aware** — `InstallConfig.Arch` is set from `runtime.GOARCH` (compile-time constant). Sysext catalog, channel fetches, and ISO builds all parameterize on arch. LTS channel is guarded for arm64 (not published by Flatcar).
+- **Sysext catalog** — from [flatcar/sysext-bakery](https://github.com/flatcar/sysext-bakery) GitHub Releases API; selects `x86-64.raw` or `arm64.raw` assets based on target arch.
+- **Channel versions** — assembled from SBOM JSON (preferred), `version.txt`, package lists, and `rootfs-included-sysexts`.
+- **Supply-chain verification** — SHA512 digest check + GPG signature verification against embedded Flatcar signing key.
+- **Disk identity** — `/dev/disk/by-id` preferred; never trusts `/dev/sdX` enumeration order.
+- **Headless mode** — mirrors TUI path through the same `internal/install` package. JSON config schema with `arch` field.
+- **ISO injection** — modifies Flatcar's `usr.squashfs` directly (the only reliable method for Flatcar PXE live boot). Uses systemd-boot (UEFI-only, BLS entries).
 
 ## Tech Stack
 
-- [Go](https://go.dev) 1.26+
+- [Go](https://go.dev) 1.26+ (CGO_ENABLED=0, static binary)
 - [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) — TUI framework
 - [Lip Gloss v2](https://github.com/charmbracelet/lipgloss) — styling
-- [Huh v2](https://github.com/charmbracelet/huh) — form inputs
+- [Huh v2](https://github.com/charmbracelet/huh) — form inputs (Dracula theme)
 - [Bubbles v2](https://github.com/charmbracelet/bubbles) — reusable components
-- [Butane v0.27](https://github.com/coreos/butane) — Ignition config compilation
+- [Butane v0.27](https://github.com/coreos/butane) — Ignition config compilation (in-process)
+- [ProtonMail/go-crypto](https://github.com/ProtonMail/go-crypto) — GPG signature verification
 - [flatcar-install](https://www.flatcar.org/docs/latest/installing/bare-metal/installing-to-disk/) — disk provisioning
+
+## CI/CD
+
+- **CI** (`ci.yml`) — go mod tidy, gofmt, vet, golangci-lint, govulncheck, test -race, per-package coverage gate, headless e2e, arm64 cross-compile
+- **Security** (`security.yml`) — CodeQL (Go), OSSF Scorecard, dependency-review
+- **Release** (`release.yml`) — triggered on `v*` tags; builds amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`; produces binaries + installer ISOs + cosign bundles
 
 ## License
 
