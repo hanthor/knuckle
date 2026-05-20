@@ -738,3 +738,189 @@ func TestToInstallConfig_Arm64(t *testing.T) {
 		t.Errorf("got arch %q, want \"arm64\"", ic.Arch)
 	}
 }
+
+// --- NVIDIA headless path tests ---
+
+func TestNvidia_DriverWithNvidiaRuntimeSysext(t *testing.T) {
+	// Case (a): nvidia_driver_version set AND nvidia-runtime in sysexts.
+	// Both should propagate to the install config.
+	catalog := []model.SysextEntry{
+		{Name: "docker", Version: "24.0.7", URL: "https://example.com/docker-24.0.7.raw"},
+		{Name: "nvidia-runtime", Version: "1.17.9", URL: "https://extensions.flatcar.org/nvidia-runtime-v1.17.9-x86-64.raw"},
+	}
+	defer mockBakery(catalog, nil)()
+
+	cfg := &Config{
+		Channel:             "stable",
+		Hostname:            "gpu-node",
+		Network:             NetworkConfig{Mode: "dhcp"},
+		Users:               []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:                "/dev/vdb",
+		Sysexts:             []string{"docker", "nvidia-runtime"},
+		NvidiaDriverVersion: "570-open",
+		DryRun:              true,
+	}
+
+	installer := &mockInstaller{}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	if err := Run(context.Background(), cfg, installer, logger); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !installer.called {
+		t.Fatal("installer.Install was not called")
+	}
+
+	ic := installer.lastCfg
+	if ic == nil {
+		t.Fatal("no install config captured")
+	}
+
+	// NvidiaDriverVersion propagated
+	if ic.NvidiaDriverVersion != "570-open" {
+		t.Errorf("NvidiaDriverVersion: got %q, want \"570-open\"", ic.NvidiaDriverVersion)
+	}
+
+	// nvidia-runtime sysext resolved
+	var foundRuntime bool
+	for _, s := range ic.Sysexts {
+		if s.Name == "nvidia-runtime" {
+			foundRuntime = true
+			if !s.Selected {
+				t.Error("nvidia-runtime sysext not marked Selected")
+			}
+		}
+	}
+	if !foundRuntime {
+		t.Error("nvidia-runtime sysext not found in install config Sysexts")
+	}
+	if len(ic.Sysexts) != 2 {
+		t.Errorf("expected 2 sysexts, got %d", len(ic.Sysexts))
+	}
+}
+
+func TestNvidia_DriverWithoutNvidiaRuntimeSysext(t *testing.T) {
+	// Case (b): nvidia_driver_version set but nvidia-runtime NOT in sysexts.
+	// This is valid — bare kernel driver without container toolkit (compute-only use case).
+	// Should succeed without error; NvidiaDriverVersion propagates, no nvidia-runtime in sysexts.
+	catalog := []model.SysextEntry{
+		{Name: "docker", Version: "24.0.7", URL: "https://example.com/docker-24.0.7.raw"},
+	}
+	defer mockBakery(catalog, nil)()
+
+	cfg := &Config{
+		Channel:             "stable",
+		Hostname:            "compute-node",
+		Network:             NetworkConfig{Mode: "dhcp"},
+		Users:               []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:                "/dev/vdb",
+		Sysexts:             []string{"docker"},
+		NvidiaDriverVersion: "550-open",
+		DryRun:              true,
+	}
+
+	installer := &mockInstaller{}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	if err := Run(context.Background(), cfg, installer, logger); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	ic := installer.lastCfg
+	if ic.NvidiaDriverVersion != "550-open" {
+		t.Errorf("NvidiaDriverVersion: got %q, want \"550-open\"", ic.NvidiaDriverVersion)
+	}
+
+	// No nvidia-runtime in sysexts
+	for _, s := range ic.Sysexts {
+		if s.Name == "nvidia-runtime" {
+			t.Error("nvidia-runtime should NOT be in sysexts when not requested")
+		}
+	}
+}
+
+func TestNvidia_RuntimeSysextWithoutDriverVersion(t *testing.T) {
+	// Case (c): nvidia-runtime in sysexts but nvidia_driver_version is empty.
+	// Currently accepted — no validation catches this mismatch.
+	// The nvidia-runtime sysext will be downloaded but the kernel module won't
+	// be configured via enabled-sysext.conf, so the runtime won't function.
+	catalog := []model.SysextEntry{
+		{Name: "nvidia-runtime", Version: "1.17.9", URL: "https://extensions.flatcar.org/nvidia-runtime-v1.17.9-x86-64.raw"},
+	}
+	defer mockBakery(catalog, nil)()
+
+	cfg := &Config{
+		Channel:             "stable",
+		Hostname:            "broken-gpu",
+		Network:             NetworkConfig{Mode: "dhcp"},
+		Users:               []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:                "/dev/vdb",
+		Sysexts:             []string{"nvidia-runtime"},
+		NvidiaDriverVersion: "", // not set — mismatch!
+		DryRun:              true,
+	}
+
+	installer := &mockInstaller{}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	// This currently succeeds — documenting the gap.
+	err := Run(context.Background(), cfg, installer, logger)
+	if err != nil {
+		t.Fatalf("Run: %v (currently expected to pass — gap: no validation for nvidia-runtime without driver)", err)
+	}
+
+	ic := installer.lastCfg
+	// NvidiaDriverVersion should be empty
+	if ic.NvidiaDriverVersion != "" {
+		t.Errorf("NvidiaDriverVersion should be empty, got %q", ic.NvidiaDriverVersion)
+	}
+	// nvidia-runtime IS in sysexts (will download but won't work without kernel driver)
+	var foundRuntime bool
+	for _, s := range ic.Sysexts {
+		if s.Name == "nvidia-runtime" {
+			foundRuntime = true
+		}
+	}
+	if !foundRuntime {
+		t.Error("nvidia-runtime should be in sysexts")
+	}
+}
+
+func TestToInstallConfig_NvidiaDriverVersionPropagation(t *testing.T) {
+	// Direct unit test: verify ToInstallConfig propagates NvidiaDriverVersion
+	cfg := &Config{
+		Channel:             "stable",
+		Hostname:            "gpu-test",
+		Network:             NetworkConfig{Mode: "dhcp"},
+		Users:               []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Disk:                "/dev/vdb",
+		NvidiaDriverVersion: "570-open",
+	}
+
+	ic, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("ToInstallConfig: %v", err)
+	}
+	if ic.NvidiaDriverVersion != "570-open" {
+		t.Errorf("NvidiaDriverVersion not propagated: got %q, want \"570-open\"", ic.NvidiaDriverVersion)
+	}
+}
+
+func TestToInstallConfig_NvidiaDriverVersionEmpty(t *testing.T) {
+	// Verify empty NvidiaDriverVersion stays empty
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "no-gpu",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users:    []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Disk:     "/dev/vdb",
+	}
+
+	ic, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("ToInstallConfig: %v", err)
+	}
+	if ic.NvidiaDriverVersion != "" {
+		t.Errorf("NvidiaDriverVersion should be empty, got %q", ic.NvidiaDriverVersion)
+	}
+}

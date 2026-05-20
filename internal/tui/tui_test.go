@@ -552,3 +552,147 @@ func TestNvidiaDriverVersionSetOnToggle(t *testing.T) {
 			w.State.Config.NvidiaDriverVersion)
 	}
 }
+
+// --- NVIDIA Edge Case Tests ---
+
+func TestNvidiaCursorClampOnDownKey(t *testing.T) {
+	// Verify cursor cannot exceed len(NvidiaDriverOptions)-1 by pressing down repeatedly.
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNvidia
+	w.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+	m := New(w)
+	m.initStepFields()
+
+	max := len(model.NvidiaDriverOptions)
+	// Press down more times than there are options.
+	for i := 0; i < max+5; i++ {
+		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	}
+	if m.cursor >= max {
+		t.Errorf("cursor should be clamped to %d, got %d", max-1, m.cursor)
+	}
+	if m.cursor != max-1 {
+		t.Errorf("cursor should be at last item %d, got %d", max-1, m.cursor)
+	}
+}
+
+func TestNvidiaCursorCannotGoNegative(t *testing.T) {
+	// Pressing up at cursor=0 should stay at 0.
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNvidia
+	w.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+	m := New(w)
+	m.initStepFields()
+	m.cursor = 0
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if m.cursor != 0 {
+		t.Errorf("cursor should stay at 0 when pressing up at top, got %d", m.cursor)
+	}
+}
+
+func TestNvidiaEnterWithInvalidCursorIsNoOp(t *testing.T) {
+	// If cursor is somehow out of bounds, enter should not panic or mutate state.
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNvidia
+	w.State.Config.NvidiaDriverVersion = "550-open"
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "nvidia-runtime", Selected: true},
+	}
+	m := New(w)
+	m.cursor = 99 // out of bounds
+
+	_, _ = m.handleEnter()
+	// Driver version should remain unchanged because guard prevented write.
+	if w.State.Config.NvidiaDriverVersion != "550-open" {
+		t.Errorf("enter with OOB cursor should not change driver version, got %q",
+			w.State.Config.NvidiaDriverVersion)
+	}
+}
+
+func TestNvidiaEnterWithNegativeCursorIsNoOp(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNvidia
+	w.State.Config.NvidiaDriverVersion = "535-open"
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "nvidia-runtime", Selected: true},
+	}
+	m := New(w)
+	m.cursor = -1
+
+	_, _ = m.handleEnter()
+	if w.State.Config.NvidiaDriverVersion != "535-open" {
+		t.Errorf("enter with negative cursor should not change driver version, got %q",
+			w.State.Config.NvidiaDriverVersion)
+	}
+}
+
+func TestNvidiaSpaceKeyIsNoOp(t *testing.T) {
+	// Space on NVIDIA step should not toggle anything or panic.
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNvidia
+	w.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+	m := New(w)
+	m.initStepFields()
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	// Should remain unchanged.
+	if w.State.Config.NvidiaDriverVersion != model.DefaultNvidiaDriverSeries {
+		t.Errorf("space on nvidia step should not change driver version, got %q",
+			w.State.Config.NvidiaDriverVersion)
+	}
+}
+
+func TestNvidiaBackNavigationPreservesCursorOnReentry(t *testing.T) {
+	// Navigate to NVIDIA, select driver at cursor=2, go back, come forward again.
+	// Cursor should restore to the configured driver position.
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNvidia
+	w.State.Config.NvidiaDriverVersion = model.NvidiaDriverOptions[2].ID
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "nvidia-runtime", Selected: true},
+	}
+	m := New(w)
+	m.initStepFields()
+
+	// Cursor should be at 2 (matching the configured driver).
+	if m.cursor != 2 {
+		t.Fatalf("cursor should start at 2, got %d", m.cursor)
+	}
+
+	// Press esc — goes back to sysext.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	if w.State.CurrentStep != model.StepSysext {
+		t.Fatalf("esc from nvidia should go to sysext, got %v", w.State.CurrentStep)
+	}
+
+	// Simulate re-entering NVIDIA by advancing forward.
+	w.State.CurrentStep = model.StepNvidia
+	m.initStepFields()
+
+	// Cursor should restore to 2 (the configured driver).
+	if m.cursor != 2 {
+		t.Errorf("cursor should restore to 2 on re-entry, got %d", m.cursor)
+	}
+}
+
+func TestNvidiaCharacterKeysAreNoOp(t *testing.T) {
+	// Typing characters on NVIDIA step (no fields) should not mutate anything.
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNvidia
+	w.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+	m := New(w)
+	m.initStepFields()
+
+	// Type random characters.
+	for _, ch := range "hello123" {
+		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+	}
+	if w.State.Config.NvidiaDriverVersion != model.DefaultNvidiaDriverSeries {
+		t.Errorf("character keys should not change driver version, got %q",
+			w.State.Config.NvidiaDriverVersion)
+	}
+	if len(m.fields) != 0 {
+		t.Errorf("nvidia step should have no fields, got %d", len(m.fields))
+	}
+}
