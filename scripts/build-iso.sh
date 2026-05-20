@@ -111,19 +111,36 @@ echo "[3/5] Building knuckle overlay..."
 
 OVERLAY_DIR="$BUILD_DIR/overlay"
 rm -rf "$OVERLAY_DIR"
+
+# Flatcar PXE uses dracut dmsquash-live: after mounting usr.squashfs as the live
+# rootfs, dracut's apply-live-updates.sh checks for [ -d /updates ] in the initramfs
+# and copies everything under updates/ into the new rootfs.  All overlay files MUST
+# live under updates/ in the cpio — bare paths in the initramfs are abandoned at pivot.
+UPDATES="$OVERLAY_DIR/updates"
 mkdir -p \
-    "$OVERLAY_DIR/opt" \
-    "$OVERLAY_DIR/etc/systemd/system/multi-user.target.wants" \
-    "$OVERLAY_DIR/etc/systemd/system"
+    "$UPDATES/opt" \
+    "$UPDATES/etc/systemd/system/multi-user.target.wants" \
+    "$UPDATES/etc/systemd/system/getty@tty1.service.d"
 
-cp "$BINARY" "$OVERLAY_DIR/opt/knuckle"
-chmod 755 "$OVERLAY_DIR/opt/knuckle"
+cp "$BINARY" "$UPDATES/opt/knuckle"
+chmod 755 "$UPDATES/opt/knuckle"
 
-cat > "$OVERLAY_DIR/etc/systemd/system/knuckle-installer.service" <<'UNIT'
+# Autologin on tty1 so Flatcar logs in as core without a password prompt.
+# The flatcar.autologin= kernel param is a dracut param that only works in PXE netboot,
+# not when booting from our cpio overlay.  We wire it ourselves via a drop-in.
+cat > "$UPDATES/etc/systemd/system/getty@tty1.service.d/autologin.conf" <<'DROPIN'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin core --noclear %I $TERM
+DROPIN
+
+cat > "$UPDATES/etc/systemd/system/knuckle-installer.service" <<'UNIT'
 [Unit]
 Description=Knuckle Flatcar Installer
 After=multi-user.target network-online.target
 Wants=network-online.target
+Conflicts=getty@tty1.service
+After=getty@tty1.service
 ConditionPathExists=/opt/knuckle
 
 [Service]
@@ -142,14 +159,14 @@ WantedBy=multi-user.target
 UNIT
 
 ln -sf /etc/systemd/system/knuckle-installer.service \
-    "$OVERLAY_DIR/etc/systemd/system/multi-user.target.wants/knuckle-installer.service"
+    "$UPDATES/etc/systemd/system/multi-user.target.wants/knuckle-installer.service"
 
 # Optional: carry the build host's SSH key into the live environment
 if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
-    mkdir -p "$OVERLAY_DIR/home/core/.ssh"
-    cp "$HOME/.ssh/id_ed25519.pub" "$OVERLAY_DIR/home/core/.ssh/authorized_keys"
-    chmod 700 "$OVERLAY_DIR/home/core/.ssh"
-    chmod 600 "$OVERLAY_DIR/home/core/.ssh/authorized_keys"
+    mkdir -p "$UPDATES/home/core/.ssh"
+    cp "$HOME/.ssh/id_ed25519.pub" "$UPDATES/home/core/.ssh/authorized_keys"
+    chmod 700 "$UPDATES/home/core/.ssh"
+    chmod 600 "$UPDATES/home/core/.ssh/authorized_keys"
 fi
 
 OVERLAY_CPIO="$BUILD_DIR/knuckle-overlay.cpio.gz"

@@ -213,28 +213,35 @@ e2e:
     rm -f .vm/target.qcow2
     qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
 
-    OVMF="/home/linuxbrew/.linuxbrew/Cellar/qemu/11.0.0/share/qemu/edk2-x86_64-code.fd"
-    if [[ ! -f "$OVMF" ]]; then
-        echo "❌ OVMF not found at $OVMF"
-        exit 1
-    fi
+    OVMF=""
+    for candidate in \
+        /usr/share/OVMF/OVMF_CODE.fd \
+        /usr/share/edk2/ovmf/OVMF_CODE.fd \
+        /home/linuxbrew/.linuxbrew/Cellar/qemu/*/share/qemu/edk2-x86_64-code.fd; do
+        # shellcheck disable=SC2086
+        for f in $candidate; do
+            [ -f "$f" ] && OVMF="$f" && break 2
+        done
+    done
+    [ -n "$OVMF" ] || { echo "OVMF not found — install ovmf package"; exit 1; }
 
-    echo "Launching installer VM in Ghostty..."
-    echo "  → ISO boots with GRUB, knuckle launches on tty1"
+    echo "Launching installer VM (UEFI, systemd-boot)..."
+    echo "  → GTK window shows VGA (tty1) — knuckle TUI appears here"
     echo "  → Target disk: .vm/target.qcow2 (20G)"
     echo "  → After install: just boot-target to verify"
     echo ""
 
-    ghostty --gtk-single-instance=false -e bash -c "\
-        cd $(pwd) && \
-        {{QEMU}} \
-            -m 4096 -smp 2 -enable-kvm \
-            -drive if=pflash,format=raw,readonly=on,file=$OVMF \
-            -cdrom $ISO \
-            -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
-            -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
-            -nographic" &
-    echo "VM window opened. When done: just boot-target"
+    echo "Launching installer VM..."
+    echo "  → GTK window shows VGA console (tty1) where knuckle TUI runs"
+    echo "  → After install: just boot-target"
+    echo ""
+    {{QEMU}} \
+        -m 4096 -smp 2 -enable-kvm \
+        -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
+        -cdrom "$ISO" \
+        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display gtk
 
 # Build installer ISO (requires xorriso, mtools, cpio, systemd-boot-efi)
 iso *CHANNEL='stable':
@@ -261,7 +268,7 @@ boot-iso:
     done
     [ -n "$OVMF" ] || { echo "OVMF not found — install ovmf package"; exit 1; }
     echo "Booting ISO (UEFI, systemd-boot)..."
-    echo "  → Ctrl-a x to quit QEMU"
+    echo "  → GTK window shows VGA console (tty1) where knuckle TUI runs"
     echo ""
     {{QEMU}} \
         -m 4096 -smp 2 -enable-kvm \
@@ -269,7 +276,7 @@ boot-iso:
         -cdrom "$ISO" \
         -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
         -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
-        -nographic
+        -display gtk
 
 # Boot ISO in background, wait for SSH
 boot-iso-ssh:
