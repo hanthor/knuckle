@@ -82,18 +82,18 @@ just e2e                 # build ISO → boot in QEMU GTK window → interactive
 | Package           | Responsibility                                                     | Coverage |
 | ----------------- | ------------------------------------------------------------------ | -------- |
 | `cmd/knuckle`     | CLI entrypoint, flag parsing, runner wiring                        | n/a      |
-| `internal/model`  | Pure data types — `InstallConfig`, `DiskInfo`, `NetworkInterface`  | 100%     |
+| `internal/model`  | Pure data types — `InstallConfig`, `DiskInfo`, `NetworkInterface`  | 93%      |
 | `internal/runner` | `Runner` interface: `RealRunner`, `DryRunner`, `SpyRunner`         | 81%      |
-| `internal/probe`  | `lsblk` + `ip addr` JSON parsing, `/dev/disk/by-id` resolution     | 81%      |
-| `internal/validate` | Hostname, CIDR, gateway, SSH key, timezone, disk path validators | 97%      |
+| `internal/probe`  | `lsblk` + `ip addr` JSON parsing, `/dev/disk/by-id` resolution     | 82%      |
+| `internal/validate` | Hostname, CIDR, gateway, SSH key, timezone, disk path validators | 95%      |
 | `internal/bakery` | sysext catalog + Flatcar release/SBOM fetchers, SHA512 check       | 85%      |
-| `internal/github` | SSH key fetch + GitHub Releases API client                         | 90%      |
-| `internal/ignition` | Butane assembly + in-process Butane→Ignition compilation         | 93%      |
-| `internal/install` | `flatcar-install` orchestration via runner                        | 76%      |
+| `internal/github` | SSH key fetch + GitHub Releases API client                         | 93%      |
+| `internal/ignition` | Butane assembly + in-process Butane→Ignition compilation         | 92%      |
+| `internal/install` | `flatcar-install` orchestration via runner                        | 79%      |
 | `internal/iso`    | Installer ISO builder helpers                                      | 100%     |
-| `internal/headless` | `--headless --config` JSON-driven install path                   | 87%      |
-| `internal/wizard` | Step state machine, navigation, validation gates                   | 81%      |
-| `internal/tui`    | Bubble Tea view models (one sub-model per step), forms             | 52%      |
+| `internal/headless` | `--headless --config` JSON-driven install path                   | 88%      |
+| `internal/wizard` | Step state machine, navigation, validation gates                   | 77%      |
+| `internal/tui`    | Bubble Tea view models (one sub-model per step), forms             | 79%      |
 
 Targets enforced by `just cover-check` are deliberately set ≤ current numbers
 so the gate guards against *regression*. Long-term aspirations live in

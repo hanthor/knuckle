@@ -106,9 +106,9 @@ cover-check:
     #!/usr/bin/env bash
     set -euo pipefail
     declare -A targets=(
-        [model]=90  [validate]=85  [ignition]=85  [github]=85
+        [model]=90  [validate]=85  [ignition]=85  [github]=90
         [bakery]=80 [probe]=80     [runner]=80    [install]=70
-        [headless]=70 [wizard]=70  [iso]=70       [tui]=40
+        [headless]=70 [wizard]=70  [iso]=70       [tui]=75
     )
     fail=0
     for pkg in "${!targets[@]}"; do
