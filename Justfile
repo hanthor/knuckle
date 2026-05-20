@@ -21,7 +21,12 @@ default:
     @echo "  just vm-e2e    — automated: headless install → boot → verify SSH"
     @echo "  just e2e       — full end-to-end: build ISO → boot → install → verify"
     @echo ""
-    @echo "ARM64 (requires arm64 hardware or QEMU TCG):"
+    @echo "Pre-release (requires network):"
+    @echo "  just catalog-check       — report new bakery extensions missing descriptions"
+    @echo "  just nvidia-check        — verify NVIDIA driver series vs Flatcar docs"
+    @echo "  just release-preflight   — all checks + ci gate before tagging a release"
+    @echo ""
+    @echo "ARM64:"
     @echo "  KNUCKLE_ARCH=arm64 just build"
     @echo "  KNUCKLE_ARCH=arm64 just boot-iso"
 
@@ -741,6 +746,43 @@ clean:
     #!/usr/bin/env bash
     just _kill-vm 2>/dev/null || true
     rm -rf bin/ .vm/
+
+# ── Catalog & version checks (require network; not part of `just ci`) ─────────
+
+# Verify descriptions.go covers all live Flatcar Bakery extensions.
+# Informational: reports gaps with copy-pasteable code stubs but does not fail.
+# Run before a release to catch newly-added bakery extensions.
+catalog-check:
+    go run ./scripts/catalog_check/
+
+# Same as catalog-check but exits non-zero if any extensions lack descriptions.
+# Use as a hard gate in automated pipelines.
+catalog-check-strict:
+    go run ./scripts/catalog_check/ --strict
+
+# Verify model.go NvidiaDriverOptions against the Flatcar NVIDIA docs.
+# Reports driver series mentioned in upstream docs vs what is in model.go.
+nvidia-check:
+    ./scripts/nvidia_check.sh
+
+# Full pre-release preflight: catalog coverage + nvidia versions + CI gate.
+# Run this before tagging any release.
+release-preflight: ci
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ""
+    echo "=== release-preflight ==="
+    echo ""
+    echo "[1/3] just ci already passed"
+    echo ""
+    echo "[2/3] Checking sysext catalog coverage against live bakery..."
+    go run ./scripts/catalog_check/ --strict
+    echo ""
+    echo "[3/3] Checking NVIDIA driver series against Flatcar docs..."
+    ./scripts/nvidia_check.sh
+    echo ""
+    echo "✓ release-preflight complete — safe to tag"
+    echo "  Reminder: run 'just vm-e2e' before publishing the release."
 
 # --- Internal helpers (not listed) ---
 

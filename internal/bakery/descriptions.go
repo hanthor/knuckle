@@ -263,3 +263,11 @@ func CaveatsFor(name string) []string {
 	}
 	return nil
 }
+
+// MissingEntry is used by scripts/catalog_check to report extensions found
+// in the live bakery that have no entry in extensionCatalog.
+type MissingEntry struct {
+	Name    string
+	Version string
+	URL     string
+}
