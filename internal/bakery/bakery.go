@@ -151,12 +151,16 @@ func (c *HTTPClient) FetchCatalogArch(ctx context.Context, arch string) ([]model
 			continue
 		}
 
-		// Find the asset matching the requested arch suffix.
-		var downloadURL string
+		// Find the asset matching the requested arch suffix AND the SHA256SUMS file.
+		var downloadURL, sha256sumsURL string
 		for _, asset := range rel.Assets {
-			if strings.Contains(asset.Name, assetSuffix) && strings.HasSuffix(asset.Name, ".raw") {
-				downloadURL = asset.BrowserDownloadURL
-				break
+			switch {
+			case asset.Name == "SHA256SUMS":
+				sha256sumsURL = asset.BrowserDownloadURL
+			case strings.Contains(asset.Name, assetSuffix) && strings.HasSuffix(asset.Name, ".raw"):
+				if downloadURL == "" {
+					downloadURL = asset.BrowserDownloadURL
+				}
 			}
 		}
 		if downloadURL == "" {
@@ -164,6 +168,16 @@ func (c *HTTPClient) FetchCatalogArch(ctx context.Context, arch string) ([]model
 		}
 
 		seen[name] = true
+
+		// Fetch the SHA256 hash for this asset (best-effort — soft fail on error).
+		sha256Hash := ""
+		if sha256sumsURL != "" {
+			// Raw filename is the last path segment of the download URL.
+			rawFilename := downloadURL[strings.LastIndex(downloadURL, "/")+1:]
+			if h, err := c.fetchSHA256ForAsset(ctx, sha256sumsURL, rawFilename); err == nil {
+				sha256Hash = h
+			}
+		}
 
 		// Start with the GitHub release body (fallback for unknown extensions).
 		description := truncateDescription(rel.Body, 80)
@@ -184,6 +198,7 @@ func (c *HTTPClient) FetchCatalogArch(ctx context.Context, arch string) ([]model
 			Description: description,
 			Version:     version,
 			URL:         downloadURL,
+			Sha256:      sha256Hash,
 			Category:    category,
 			SupportTier: supportTier,
 			Selected:    false,
@@ -215,6 +230,56 @@ func parseLinkNext(linkHeader string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// fetchSHA256ForAsset downloads the SHA256SUMS file from sha256sumsURL and returns
+// the hex SHA256 hash for rawFilename. Returns ("", nil) when the file is found but
+// the hash for rawFilename is not in it. Returns an error only on network/parse failure.
+// Callers should treat ("", err) as a soft failure and proceed without verification.
+func (c *HTTPClient) fetchSHA256ForAsset(ctx context.Context, sha256sumsURL, rawFilename string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sha256sumsURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("creating SHA256SUMS request: %w", err)
+	}
+	req.Header.Set("User-Agent", "knuckle/1.0")
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetching SHA256SUMS: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("SHA256SUMS returned HTTP %d", resp.StatusCode)
+	}
+
+	// SHA256SUMS files are small (≤64KB).
+	const maxSHA256Size = 64 << 10
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSHA256Size))
+	if err != nil {
+		return "", fmt.Errorf("reading SHA256SUMS: %w", err)
+	}
+
+	// Format: "<hash>  <filename>" (two spaces) or "<hash> <filename>" (one space).
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		// fields[1] may be "./filename" or just "filename".
+		baseName := fields[1]
+		if idx := strings.LastIndex(baseName, "/"); idx >= 0 {
+			baseName = baseName[idx+1:]
+		}
+		if baseName == rawFilename {
+			return fields[0], nil
+		}
+	}
+	return "", nil // file found but hash for this asset not listed
 }
 
 // ParseTagName extracts sysext name and version from a release tag.

@@ -132,6 +132,7 @@ type SysextEntry struct {
 	Description string
 	Version     string
 	URL         string
+	Sha256      string `json:",omitempty"` // SHA256 hash for Ignition download verification; empty = unverified
 	Selected    bool
 	// Category and SupportTier are curated display metadata populated by the bakery
 	// package at fetch time. They are not user-supplied and are excluded from JSON

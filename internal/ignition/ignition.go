@@ -149,6 +149,10 @@ storage:
     - path: /etc/extensions/{{.Name}}.raw
       contents:
         source: "{{.URL | yamlEscape}}"
+{{- if .Sha256}}
+        verification:
+          hash: "sha256-{{.Sha256}}"
+{{- end}}
 {{- end}}
 {{- if .Timezone}}
   links:

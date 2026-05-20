@@ -555,3 +555,49 @@ func TestGenerateButaneUnselectedSysextsOmitService(t *testing.T) {
 		t.Error("unselected docker sysext must not appear in output")
 	}
 }
+
+func TestGenerateButaneWithSysextSHA256(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "verified-node",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core"}},
+		Sysexts: []model.SysextEntry{
+			{
+				Name:     "wasmtime",
+				Version:  "44.0.1",
+				URL:      "https://extensions.flatcar.org/wasmtime-v44.0.1-x86-64.raw",
+				Sha256:   "e5336201eedf0c5e7620c6947c821009c362231f7c9023174b9c4f99a1f0ad1b",
+				Selected: true,
+			},
+			{
+				Name:     "docker",
+				Version:  "28.0.0",
+				URL:      "https://extensions.flatcar.org/docker-28.0.0-x86-64.raw",
+				Sha256:   "", // no hash — verification block must be absent
+				Selected: true,
+			},
+		},
+	}
+
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// wasmtime entry must include verification hash.
+	if !strings.Contains(output, "sha256-e5336201eedf0c5e7620c6947c821009c362231f7c9023174b9c4f99a1f0ad1b") {
+		t.Error("wasmtime entry should contain sha256 verification hash in Butane output")
+	}
+	if !strings.Contains(output, "verification:") {
+		t.Error("Butane output should contain 'verification:' block for hashed sysext")
+	}
+
+	// docker entry has no hash — verification block must NOT appear for that entry.
+	// We verify by checking the overall output doesn't have TWO verification blocks
+	// (only one sysext has a hash).
+	count := strings.Count(output, "verification:")
+	if count != 1 {
+		t.Errorf("expected exactly 1 verification block (only wasmtime has a hash), got %d", count)
+	}
+}

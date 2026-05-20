@@ -121,22 +121,15 @@ func buildInstallArgs(cfg *model.InstallConfig, ignitionPath string) []string {
 }
 
 // WriteIgnitionFile writes the Ignition JSON to a secure temp file.
-// Uses os.CreateTemp with O_EXCL to prevent symlink attacks (TOCTOU).
+// Go 1.16+ os.CreateTemp uses O_RDWR|O_CREATE|O_EXCL with 0600 permissions atomically —
+// the file is never readable by other users, even between creation and content write.
 // Returns the path to the created temp file.
 func (i *FlatcarInstaller) WriteIgnitionFile(ignitionJSON string) (string, error) {
-	// os.CreateTemp uses O_RDWR|O_CREATE|O_EXCL — fails if file exists
 	f, err := os.CreateTemp("", "knuckle-ignition-*.json")
 	if err != nil {
 		return "", fmt.Errorf("creating temp ignition file: %w", err)
 	}
 	path := f.Name()
-
-	// Set restrictive permissions (600) before writing sensitive content
-	if err := f.Chmod(0600); err != nil {
-		_ = f.Close()
-		_ = os.Remove(path)
-		return "", fmt.Errorf("setting ignition file permissions: %w", err)
-	}
 
 	if _, err := f.WriteString(ignitionJSON); err != nil {
 		_ = f.Close()

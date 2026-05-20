@@ -492,3 +492,72 @@ func TestParseLinkNext(t *testing.T) {
 		})
 	}
 }
+
+func TestFetchSHA256ForAsset(t *testing.T) {
+	sha256Content := `e5336201eedf0c5e7620c6947c821009c362231f7c9023174b9c4f99a1f0ad1b  wasmtime-v44.0.1-x86-64.raw
+b9f7ded92635349c405f833d51d7d268cc81062d081960d3c15870c9262e6df2  wasmtime-v44.0.1-arm64.raw
+`
+	sha256Payload := `[{
+		"tag_name": "wasmtime-v44.0.1",
+		"body": "wasmtime release",
+		"assets": [
+			{"name": "wasmtime-v44.0.1-x86-64.raw", "browser_download_url": "https://BASEURL/wasmtime-v44.0.1-x86-64.raw"},
+			{"name": "SHA256SUMS", "browser_download_url": "https://BASEURL/SHA256SUMS"}
+		]
+	}]`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		if r.URL.Path == "/SHA256SUMS" {
+			_, _ = w.Write([]byte(sha256Content))
+			return
+		}
+		// Main catalog endpoint — replace placeholder with real server URL
+		catalog := strings.ReplaceAll(sha256Payload, "https://BASEURL", "http://"+r.Host)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(catalog))
+	}))
+	defer srv.Close()
+
+	client := bakery.NewHTTPClientWithURL(srv.URL)
+	entries, err := client.FetchCatalog(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	e := entries[0]
+	if e.Sha256 == "" {
+		t.Error("SHA256 hash should be populated from SHA256SUMS file")
+	}
+	const wantHash = "e5336201eedf0c5e7620c6947c821009c362231f7c9023174b9c4f99a1f0ad1b"
+	if e.Sha256 != wantHash {
+		t.Errorf("expected SHA256 %q, got %q", wantHash, e.Sha256)
+	}
+}
+
+func TestFetchSHA256MissingAsset(t *testing.T) {
+	// Release without a SHA256SUMS asset — entry should be returned without hash.
+	payload := `[{"tag_name":"docker-v24.0.7","body":"Docker","assets":[{"name":"docker-24.0.7-x86-64.raw","browser_download_url":"https://example.com/docker.raw"}]}]`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	client := bakery.NewHTTPClientWithURL(srv.URL)
+	entries, err := client.FetchCatalog(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	// Sha256 must be empty when no SHA256SUMS asset is present (soft fail).
+	if entries[0].Sha256 != "" {
+		t.Errorf("expected empty Sha256 when no SHA256SUMS asset, got %q", entries[0].Sha256)
+	}
+}

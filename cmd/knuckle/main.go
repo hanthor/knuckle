@@ -65,7 +65,7 @@ func main() {
 	}
 
 	// Set up logging to file (never stdout — Bubble Tea owns stdout)
-	logWriter, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logWriter, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening log file: %v\n", err)
 		os.Exit(1)
@@ -135,7 +135,7 @@ func main() {
 // runHeadless loads a JSON config and runs the install without TUI.
 func runHeadless(configPath string, dryRun bool, logFile string) {
 	// Set up logging
-	logWriter, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logWriter, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening log file: %v\n", err)
 		os.Exit(1)
