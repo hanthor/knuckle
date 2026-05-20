@@ -3,21 +3,14 @@
 A modern, interactive TUI "installer" for [Flatcar Container Linux](https://www.flatcar.org/), designed for bare-metal deployments. Not a real installer because making one would be dumb. It's a form that makes a valid ignition file and passes it to the installer. We're just making users not have to use ignition, with an ubuntu-server style install UX. 
 
 This is also basically [Azure Container Linux (Home Edition)](https://opensource.microsoft.com/blog/2026/05/18/from-open-source-to-agentic-systems-microsoft-at-open-source-summit-north-america-2026/). 
+- [Download an ISO](https://github.com/castrojo/knuckle/releases) for ARM or AMD64 and install it.
+- Follow the installer you'll be left with a pristine upstream install of Flatcar linux
 
 ![img](https://github.com/user-attachments/assets/802bb450-f48c-4186-a1d0-542535124bc5)
 
 ## Why
 
 Flatcar is typically provisioned in cloud environments via Butane and ignition configs and wraps it in a usable UX. 
-
-## Status
-
-**Feature-complete.** All 9 TUI steps are implemented, with 214 tests passing (race-clean).
-
-## How to Try it? 
-
-- [Download an ISO](https://github.com/castrojo/knuckle/releases) for ARM or AMD64 and install it.
-- Follow the installer you'll be left with a pristine upstream install of Flatcar linux
 
 [progress](https://github.com/user-attachments/assets/0d4160da-8731-4a92-b103-98b901dd9c3d)
 
