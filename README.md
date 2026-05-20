@@ -10,7 +10,7 @@ This is also basically [Azure Container Linux (Home Edition)](https://opensource
 
 ## Why
 
-Flatcar is typically provisioned in cloud environments via Butane and ignition configs and wraps it in a usable UX. 
+Flatcar is typically provisioned in cloud environments via Butane and ignition configs and wraps it in a usable UX. Flatcar is also in the [CNCF](https://cncf.io), which means there's a core operating system in a vendor-neutral Foundation. The kind of tech that will stick around in the long term. Perfect for home servers, NAS builds, cluster setups, you name it. 
 
 [progress](https://github.com/user-attachments/assets/0d4160da-8731-4a92-b103-98b901dd9c3d)
 
