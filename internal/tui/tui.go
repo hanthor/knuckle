@@ -735,6 +735,10 @@ func (m *Model) viewNetwork() string {
 
 func (m *Model) viewStorage() string {
 	var b strings.Builder
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	sizeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+
 	b.WriteString("Select Target Disk\n\n")
 	if len(m.Wizard.State.Disks) == 0 {
 		b.WriteString("No disks detected!\n")
@@ -745,18 +749,41 @@ func (m *Model) viewStorage() string {
 		if i == m.cursor {
 			cursor = "▸ "
 		}
-		line := fmt.Sprintf("%s%s — %s [%s] %s", cursor, disk.DevPath, disk.Model, disk.SizeHuman, disk.Transport)
-		if disk.Removable {
-			line += " (removable)"
+
+		// Line 1: cursor + model + size right-aligned
+		model := disk.Model
+		if model == "" {
+			model = "Unknown Disk"
 		}
+		size := disk.SizeHuman
+		padding := 56 - len(model) - len(size)
+		if padding < 2 {
+			padding = 2
+		}
+		line1 := cursor + model + strings.Repeat(" ", padding) + sizeStyle.Render(size)
+
+		// Line 2: path + transport
+		path := disk.Path
+		if path == "" {
+			path = disk.DevPath
+		}
+		transport := disk.Transport
+		if disk.Removable {
+			transport += " (removable)"
+		}
+		line2 := "    " + dimStyle.Render(path+"  "+transport)
+
 		if i == m.cursor {
-			b.WriteString(selectedStyle.Render(line))
+			b.WriteString(selectedStyle.Render(line1))
 		} else {
-			b.WriteString(line)
+			b.WriteString(line1)
 		}
 		b.WriteString("\n")
+		b.WriteString(line2)
+		b.WriteString("\n\n")
 	}
-	b.WriteString("\n⚠ WARNING: All data on the selected disk will be erased!\n")
+	b.WriteString(warnStyle.Render("⚠ All data on the selected disk will be erased!"))
+	b.WriteString("\n")
 	return b.String()
 }
 
@@ -940,19 +967,19 @@ func (m *Model) viewReview() string {
 
 func (m *Model) viewInstall() string {
 	var b strings.Builder
+	doneStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+
 	b.WriteString("Installing Flatcar Container Linux...\n\n")
 
-	// Animated progress bar
-	b.WriteString("  " + m.progress.View() + "\n\n")
-
-	// Completed phases
+	// Completed phases with green checkmarks
 	for _, msg := range m.Wizard.State.ProgressMessages {
-		fmt.Fprintf(&b, "  ✓ %s\n", msg)
+		b.WriteString("  " + doneStyle.Render("✓") + " " + msg + "\n")
 	}
 
-	// Current phase with spinner
+	// Current phase with spinner + progress bar
 	if m.installing {
-		b.WriteString(fmt.Sprintf("\n  %s Working...\n", m.spinner.View()))
+		b.WriteString(fmt.Sprintf("  %s Working...\n", m.spinner.View()))
+		b.WriteString("\n  " + m.progress.View() + "\n")
 	}
 
 	if !m.installing && len(m.Wizard.State.ProgressMessages) == 0 {
@@ -962,23 +989,39 @@ func (m *Model) viewInstall() string {
 }
 
 func (m *Model) viewDone() string {
-	if m.Wizard.State.Config.DryRun {
-		return `
-✅ Installation Complete! (dry-run)
+	var b strings.Builder
+	cfg := &m.Wizard.State.Config
 
-Flatcar Container Linux install simulation finished.
-No changes were made to disk.
-
-Press q to exit.
-`
+	if cfg.DryRun {
+		b.WriteString("\n✅ Installation Complete! (dry-run — no changes made)\n\n")
+	} else {
+		b.WriteString("\n✅ Installation Complete!\n\n")
 	}
-	return `
-✅ Installation Complete!
 
-Flatcar Container Linux has been installed successfully.
+	b.WriteString("Flatcar Container Linux has been installed:\n\n")
 
-Press r twice to reboot, or q to exit.
-`
+	if cfg.Disk.Model != "" {
+		fmt.Fprintf(&b, "  Disk:     %s (%s)\n", cfg.Disk.Model, cfg.Disk.SizeHuman)
+	} else if cfg.Disk.DevPath != "" {
+		fmt.Fprintf(&b, "  Disk:     %s\n", cfg.Disk.DevPath)
+	}
+	if cfg.Channel != "" {
+		fmt.Fprintf(&b, "  Channel:  %s\n", cfg.Channel)
+	}
+	if cfg.Hostname != "" {
+		fmt.Fprintf(&b, "  Hostname: %s\n", cfg.Hostname)
+	}
+	if len(cfg.Users) > 0 && cfg.Users[0].Username != "" {
+		fmt.Fprintf(&b, "  User:     %s\n", cfg.Users[0].Username)
+	}
+
+	b.WriteString("\n")
+	if cfg.DryRun {
+		b.WriteString("Press q to exit.\n")
+	} else {
+		b.WriteString("Press r twice to reboot, or q to exit.\n")
+	}
+	return b.String()
 }
 
 // Run starts the Bubble Tea program
