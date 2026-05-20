@@ -6,15 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/NVIDIA/go-nvlib/pkg/nvpci"
 
 	"github.com/castrojo/knuckle/internal/model"
 	"github.com/castrojo/knuckle/internal/runner"
 )
-
-// pciDevicesPath is the root of the PCI sysfs device tree.
-// Override in tests to use a temporary directory.
-var pciDevicesPath = "/sys/bus/pci/devices"
 
 // Prober is the interface for system hardware discovery
 type Prober interface {
@@ -236,52 +233,40 @@ func resolveByIDPath(devPath string) string {
 	return devPath
 }
 
-// NvidiaGPUInfo represents a detected NVIDIA GPU found via the PCI sysfs tree.
+// NvidiaGPUInfo represents a detected NVIDIA GPU.
 type NvidiaGPUInfo struct {
 	PCIAddress string // e.g. "0000:01:00.0"
 	PCIClass   string // e.g. "0x030200" (3D controller)
+	DeviceName string // e.g. "GA102 [GeForce RTX 3080]" from PCI IDs database
 }
 
-// DetectNvidiaGPUs scans the PCI device tree for NVIDIA display/compute controllers.
-// No NVIDIA driver needs to be loaded — reads /sys/bus/pci/devices/ directly.
-// The installer runs on the target machine, so any GPU detected here will also be
-// present on the installed system, making this safe for sysext auto-selection.
-// Returns an empty slice when no NVIDIA GPUs are found or /sys is unavailable.
+// DetectNvidiaGPUs scans the PCI device tree for NVIDIA GPUs using go-nvlib.
+// Uses github.com/NVIDIA/go-nvlib/pkg/nvpci — reads /sys/bus/pci/devices directly,
+// no NVIDIA driver required. Returns DeviceName from the embedded PCI IDs database.
+// The installer runs on the target machine, so detected GPUs will be present on
+// the installed system — safe to use for sysext auto-selection.
 func DetectNvidiaGPUs() []NvidiaGPUInfo {
-	return detectNvidiaGPUsFromPath(pciDevicesPath)
+	return nvidiaGPUsFromClient(nvpci.New())
 }
 
-func detectNvidiaGPUsFromPath(devPath string) []NvidiaGPUInfo {
-	const nvidiaVendorID = "0x10de"
-
-	vendorPaths, err := filepath.Glob(filepath.Join(devPath, "*", "vendor"))
-	if err != nil || len(vendorPaths) == 0 {
+// nvidiaGPUsFromClient maps nvpci GPU devices to NvidiaGPUInfo.
+// Accepts nvpci.Interface for injection in tests (use nvpci.InterfaceMock).
+func nvidiaGPUsFromClient(client nvpci.Interface) []NvidiaGPUInfo {
+	gpus, err := client.GetGPUs()
+	if err != nil {
 		return nil
 	}
-
-	var gpus []NvidiaGPUInfo
-	for _, vendorFile := range vendorPaths {
-		data, err := os.ReadFile(vendorFile)
-		if err != nil {
-			continue
+	result := make([]NvidiaGPUInfo, 0, len(gpus))
+	for _, g := range gpus {
+		name := g.DeviceName
+		if name == nvpci.UnknownDeviceString || name == "" {
+			name = fmt.Sprintf("NVIDIA GPU (device 0x%04x)", g.Device)
 		}
-		if strings.TrimSpace(string(data)) != nvidiaVendorID {
-			continue
-		}
-		dir := filepath.Dir(vendorFile)
-		classData, err := os.ReadFile(filepath.Join(dir, "class"))
-		if err != nil {
-			continue
-		}
-		class := strings.TrimSpace(string(classData))
-		// Display and compute controllers occupy the 0x03xxxx PCI class range:
-		// 0x030000 = VGA compatible, 0x030200 = 3D controller, etc.
-		if strings.HasPrefix(class, "0x03") {
-			gpus = append(gpus, NvidiaGPUInfo{
-				PCIAddress: filepath.Base(dir),
-				PCIClass:   class,
-			})
-		}
+		result = append(result, NvidiaGPUInfo{
+			PCIAddress: g.Address,
+			PCIClass:   fmt.Sprintf("0x%06x", g.Class),
+			DeviceName: name,
+		})
 	}
-	return gpus
+	return result
 }

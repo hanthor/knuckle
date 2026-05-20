@@ -960,7 +960,7 @@ func (m *Model) viewNvidia() string {
 	if m.Wizard.State.NvidiaGPUDetected {
 		b.WriteString(okStyle.Render("  ✓ NVIDIA GPU detected on this machine") + "\n")
 		for _, gpu := range m.Wizard.State.NvidiaGPUs {
-			b.WriteString(dimStyle.Render(fmt.Sprintf("    %s  ·  class %s", gpu.PCIAddress, gpu.PCIClass)) + "\n")
+			b.WriteString(dimStyle.Render(fmt.Sprintf("    %s  ·  %s", gpu.PCIAddress, gpu.DeviceName)) + "\n")
 		}
 	} else {
 		b.WriteString(warnStyle.Render("  ⚠ No NVIDIA GPU detected — continuing at your request") + "\n")

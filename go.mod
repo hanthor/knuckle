@@ -3,6 +3,7 @@ module github.com/castrojo/knuckle
 go 1.26.2
 
 require (
+	github.com/NVIDIA/go-nvlib v0.10.0
 	github.com/ProtonMail/go-crypto v1.4.1
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10

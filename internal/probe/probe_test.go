@@ -3,8 +3,11 @@ package probe
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
+
+	"github.com/NVIDIA/go-nvlib/pkg/nvpci"
 
 	"github.com/castrojo/knuckle/internal/runner"
 )
@@ -144,88 +147,101 @@ func TestResolveByIDPathFallback(t *testing.T) {
 	}
 }
 
-func TestDetectNvidiaGPUs_NoDevices(t *testing.T) {
-	tmp := t.TempDir()
-	pciDevicesPath = tmp
-	defer func() { pciDevicesPath = "/sys/bus/pci/devices" }()
+// GPU detection tests use nvidiaGPUsFromClient with nvpci.InterfaceMock,
+// eliminating the need for fake /sys directories.
 
-	gpus := DetectNvidiaGPUs()
+func TestDetectNvidiaGPUs_NoDevices(t *testing.T) {
+	mock := &nvpci.InterfaceMock{
+		GetGPUsFunc: func() ([]*nvpci.NvidiaPCIDevice, error) {
+			return nil, nil
+		},
+	}
+	gpus := nvidiaGPUsFromClient(mock)
 	if len(gpus) != 0 {
-		t.Errorf("expected 0 GPUs in empty tmpdir, got %d", len(gpus))
+		t.Errorf("expected 0 GPUs, got %d", len(gpus))
 	}
 }
 
 func TestDetectNvidiaGPUs_NvidiaPresent(t *testing.T) {
-	tmp := t.TempDir()
-	pciDevicesPath = tmp
-	defer func() { pciDevicesPath = "/sys/bus/pci/devices" }()
-
-	// Create a fake NVIDIA 3D controller device.
-	devDir := tmp + "/0000:01:00.0"
-	if err := os.Mkdir(devDir, 0755); err != nil {
-		t.Fatal(err)
+	mock := &nvpci.InterfaceMock{
+		GetGPUsFunc: func() ([]*nvpci.NvidiaPCIDevice, error) {
+			return []*nvpci.NvidiaPCIDevice{
+				{
+					Address:    "0000:01:00.0",
+					Class:      0x030200,
+					Device:     0x2204, // RTX 3080
+					DeviceName: "GA102 [GeForce RTX 3080]",
+				},
+			}, nil
+		},
 	}
-	if err := os.WriteFile(devDir+"/vendor", []byte("0x10de\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(devDir+"/class", []byte("0x030200\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	gpus := DetectNvidiaGPUs()
+	gpus := nvidiaGPUsFromClient(mock)
 	if len(gpus) != 1 {
 		t.Fatalf("expected 1 GPU, got %d", len(gpus))
 	}
 	if gpus[0].PCIAddress != "0000:01:00.0" {
-		t.Errorf("expected PCI address 0000:01:00.0, got %q", gpus[0].PCIAddress)
+		t.Errorf("unexpected PCI address: %q", gpus[0].PCIAddress)
 	}
 	if gpus[0].PCIClass != "0x030200" {
-		t.Errorf("expected class 0x030200, got %q", gpus[0].PCIClass)
+		t.Errorf("unexpected class: %q", gpus[0].PCIClass)
+	}
+	if gpus[0].DeviceName != "GA102 [GeForce RTX 3080]" {
+		t.Errorf("expected DeviceName from PCI DB, got %q", gpus[0].DeviceName)
 	}
 }
 
-func TestDetectNvidiaGPUs_NonNvidiaIgnored(t *testing.T) {
-	tmp := t.TempDir()
-	pciDevicesPath = tmp
-	defer func() { pciDevicesPath = "/sys/bus/pci/devices" }()
-
-	// AMD GPU — should not be detected.
-	devDir := tmp + "/0000:02:00.0"
-	if err := os.Mkdir(devDir, 0755); err != nil {
-		t.Fatal(err)
+func TestDetectNvidiaGPUs_MultipleGPUs(t *testing.T) {
+	mock := &nvpci.InterfaceMock{
+		GetGPUsFunc: func() ([]*nvpci.NvidiaPCIDevice, error) {
+			return []*nvpci.NvidiaPCIDevice{
+				{Address: "0000:01:00.0", Class: 0x030200, DeviceName: "GA102 [GeForce RTX 3080]"},
+				{Address: "0000:02:00.0", Class: 0x030200, DeviceName: "AD102 [GeForce RTX 4090]"},
+			}, nil
+		},
 	}
-	if err := os.WriteFile(devDir+"/vendor", []byte("0x1002\n"), 0644); err != nil {
-		t.Fatal(err)
+	gpus := nvidiaGPUsFromClient(mock)
+	if len(gpus) != 2 {
+		t.Fatalf("expected 2 GPUs, got %d", len(gpus))
 	}
-	if err := os.WriteFile(devDir+"/class", []byte("0x030000\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	gpus := DetectNvidiaGPUs()
-	if len(gpus) != 0 {
-		t.Errorf("expected 0 NVIDIA GPUs (AMD vendor), got %d", len(gpus))
+	if gpus[1].DeviceName != "AD102 [GeForce RTX 4090]" {
+		t.Errorf("unexpected DeviceName for second GPU: %q", gpus[1].DeviceName)
 	}
 }
 
-func TestDetectNvidiaGPUs_NonDisplayClassIgnored(t *testing.T) {
-	tmp := t.TempDir()
-	pciDevicesPath = tmp
-	defer func() { pciDevicesPath = "/sys/bus/pci/devices" }()
+func TestDetectNvidiaGPUs_UnknownDevice_FallsBackToDeviceID(t *testing.T) {
+	mock := &nvpci.InterfaceMock{
+		GetGPUsFunc: func() ([]*nvpci.NvidiaPCIDevice, error) {
+			return []*nvpci.NvidiaPCIDevice{
+				{
+					Address:    "0000:03:00.0",
+					Class:      0x030200,
+					Device:     0xabcd,
+					DeviceName: nvpci.UnknownDeviceString,
+				},
+			}, nil
+		},
+	}
+	gpus := nvidiaGPUsFromClient(mock)
+	if len(gpus) != 1 {
+		t.Fatalf("expected 1 GPU, got %d", len(gpus))
+	}
+	// Should fall back to "NVIDIA GPU (device 0xabcd)"
+	if gpus[0].DeviceName == nvpci.UnknownDeviceString {
+		t.Error("DeviceName should not be UNKNOWN_DEVICE — should fall back to device ID")
+	}
+	if gpus[0].DeviceName == "" {
+		t.Error("DeviceName must not be empty")
+	}
+}
 
-	// NVIDIA audio controller (not display class) — should not be detected.
-	devDir := tmp + "/0000:01:00.1"
-	if err := os.Mkdir(devDir, 0755); err != nil {
-		t.Fatal(err)
+func TestDetectNvidiaGPUs_ErrorFromClient(t *testing.T) {
+	mock := &nvpci.InterfaceMock{
+		GetGPUsFunc: func() ([]*nvpci.NvidiaPCIDevice, error) {
+			return nil, fmt.Errorf("sysfs unavailable")
+		},
 	}
-	if err := os.WriteFile(devDir+"/vendor", []byte("0x10de\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(devDir+"/class", []byte("0x040300\n"), 0644); err != nil { // audio controller
-		t.Fatal(err)
-	}
-
-	gpus := DetectNvidiaGPUs()
-	if len(gpus) != 0 {
-		t.Errorf("expected 0 GPUs (audio class, not display), got %d", len(gpus))
+	gpus := nvidiaGPUsFromClient(mock)
+	if gpus != nil {
+		t.Errorf("expected nil on error, got %v", gpus)
 	}
 }
