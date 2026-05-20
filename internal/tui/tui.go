@@ -67,9 +67,10 @@ type Model struct {
 	showAdvanced     bool
 
 	// Install progress
-	spinner    spinner.Model
-	progress   progress.Model
-	progressCh chan string
+	spinner       spinner.Model
+	progress      progress.Model
+	progressCh    chan string
+	installCancel context.CancelFunc
 }
 
 type field struct {
@@ -120,6 +121,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			if m.confirmQuit {
 				m.quitting = true
+				if m.installCancel != nil {
+					m.installCancel()
+				}
 				return m, tea.Quit
 			}
 			m.confirmQuit = true
@@ -233,6 +237,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		if m.confirmQuit {
 			m.quitting = true
+			if m.installCancel != nil {
+				m.installCancel()
+			}
 			return m, tea.Quit
 		}
 		m.confirmQuit = true
@@ -274,6 +281,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// On non-field steps, require confirmation (same as Ctrl+C)
 		if m.confirmQuit {
 			m.quitting = true
+			if m.installCancel != nil {
+				m.installCancel()
+			}
 			return m, tea.Quit
 		}
 		m.confirmQuit = true
@@ -453,20 +463,20 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) startInstall() tea.Cmd {
-	// Use a channel to send progress messages back to the TUI
 	progressCh := make(chan string, 10)
 	m.progressCh = progressCh
 
-	// Start install in background
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	m.installCancel = cancel
+
 	go func() {
+		defer cancel()
 		defer close(progressCh)
 		defer func() {
 			if r := recover(); r != nil {
 				progressCh <- fmt.Sprintf("PANIC: %v", r)
 			}
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
 
 		progress := func(msg string) {
 			progressCh <- msg

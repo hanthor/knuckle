@@ -307,7 +307,98 @@ vm-e2e:
     fi
 
     echo ""
-    echo "✅ vm-e2e PASSED"
+    echo "✅ vm-e2e DHCP pass PASSED"
+
+    # ── Static network pass ────────────────────────────────────────────────
+    # QEMU slirp default subnet is 10.0.2.x — configure static using those
+    # addresses so port-forwarding still works while testing the static path.
+    echo ""
+    echo "=== vm-e2e static network pass ==="
+    echo ""
+
+    just _kill-vm
+    rm -f .vm/target-static.qcow2
+    qemu-img create -f qcow2 .vm/target-static.qcow2 20G >/dev/null
+
+    # New installer overlay on same base
+    rm -f .vm/boot.qcow2
+    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base.img" -F qcow2 .vm/boot.qcow2 >/dev/null
+
+    # Detect interface name from the running Flatcar image (virtio-net → ens3 or eth0)
+    # Write headless config with static network using QEMU slirp addresses
+    printf '{"channel":"stable","hostname":"e2e-static","timezone":"UTC","network":{"mode":"static","interface":"ens3","address":"10.0.2.15/24","gateway":"10.0.2.2"},"users":[{"username":"core","ssh_keys":["%s"]}],"disk":"/dev/vdb","update_strategy":"off","reboot":false}\n' \
+        "$E2E_PUB" > .vm/e2e-static-config.json
+
+    echo "[1/4] Booting installer VM (static network pass)..."
+    {{QEMU}} \
+        -m 4096 -smp 2 -enable-kvm \
+        -drive if=virtio,file=.vm/boot.qcow2,format=qcow2 \
+        -drive if=virtio,file=.vm/target-static.qcow2,format=qcow2 \
+        -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/e2e-installer.ign \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid \
+        -serial file:.vm/e2e-static-installer-serial.log
+
+    ok=0
+    for i in $(seq 1 40); do
+        $E2E_SSH -o ConnectTimeout=3 true 2>/dev/null && ok=1 && break
+        sleep 3
+    done
+    [ "$ok" = "1" ] || { echo "❌ installer VM never came up"; tail -20 .vm/e2e-static-installer-serial.log 2>/dev/null; exit 1; }
+    echo "  ✓ installer VM ready"
+
+    echo "[2/4] Running headless install (static network config)..."
+    $E2E_SCP .vm/e2e-static-config.json core@127.0.0.1:/tmp/e2e-static-config.json >/dev/null
+    if ! $E2E_SSH "timeout 15m sudo /tmp/knuckle --headless --config /tmp/e2e-static-config.json --log-file /tmp/knuckle-static.log"; then
+        echo "❌ headless install (static) failed — knuckle-static.log:"
+        $E2E_SSH "cat /tmp/knuckle-static.log" 2>/dev/null || true
+        exit 1
+    fi
+    echo "  ✓ static install completed"
+
+    echo "[3/4] Booting static-configured installed disk..."
+    just _kill-vm
+    sleep 1
+    {{QEMU}} \
+        -m 2048 -smp 2 -enable-kvm \
+        -drive if=virtio,file=.vm/target-static.qcow2,format=qcow2 \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid \
+        -serial file:.vm/e2e-static-target-serial.log
+
+    ok=0
+    for i in $(seq 1 60); do
+        $E2E_SSH -o ConnectTimeout=3 true 2>/dev/null && ok=1 && break
+        sleep 5
+    done
+    [ "$ok" = "1" ] || { echo "❌ static system never came up"; tail -20 .vm/e2e-static-target-serial.log 2>/dev/null; exit 1; }
+    echo "  ✓ static system SSH accessible"
+
+    echo "[4/4] Verifying static network config on installed system..."
+
+    STATIC_HOST=$($E2E_SSH hostname 2>/dev/null) || { echo "❌ hostname failed"; exit 1; }
+    [ "$STATIC_HOST" = "e2e-static" ] || { echo "❌ hostname '$STATIC_HOST' != 'e2e-static'"; exit 1; }
+    echo "  ✓ hostname: $STATIC_HOST"
+
+    # Verify the static networkd unit exists with correct content
+    if $E2E_SSH "test -f /etc/systemd/network/10-static.network" 2>/dev/null; then
+        echo "  ✓ /etc/systemd/network/10-static.network exists"
+        IFACE=$($E2E_SSH "grep ^Name= /etc/systemd/network/10-static.network" 2>/dev/null | cut -d= -f2) || true
+        ADDR=$($E2E_SSH "grep ^Address= /etc/systemd/network/10-static.network" 2>/dev/null | cut -d= -f2) || true
+        GW=$($E2E_SSH "grep ^Gateway= /etc/systemd/network/10-static.network" 2>/dev/null | cut -d= -f2) || true
+        echo "  ✓ interface: $IFACE  address: $ADDR  gateway: $GW"
+        [ "$ADDR" = "10.0.2.15/24" ] || echo "  ⚠ address mismatch: got '$ADDR', expected 10.0.2.15/24"
+        [ "$GW"   = "10.0.2.2"    ] || echo "  ⚠ gateway mismatch: got '$GW', expected 10.0.2.2"
+    else
+        echo "❌ /etc/systemd/network/10-static.network not found"
+        $E2E_SSH "ls /etc/systemd/network/" 2>/dev/null || true
+        exit 1
+    fi
+
+    echo ""
+    echo "✅ vm-e2e STATIC pass PASSED"
+    echo ""
+    echo "✅ ALL vm-e2e passes PASSED"
 
 # SSH into running VM
 ssh:

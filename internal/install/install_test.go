@@ -327,6 +327,42 @@ func TestWriteIgnitionFileSecure(t *testing.T) {
 	}
 }
 
+func TestInstallWithStaticNetwork(t *testing.T) {
+	spy := runner.NewSpyRunner()
+	installer := NewFlatcarInstaller(spy, testLogger())
+	cfg := &model.InstallConfig{
+		Channel:  "stable",
+		Hostname: "static-node",
+		Disk:     model.DiskInfo{DevPath: "/dev/vda"},
+		Network: model.NetworkConfig{
+			Mode:      model.NetworkStatic,
+			Interface: "eth0",
+			Address:   "10.0.2.15/24",
+			Gateway:   "10.0.2.2",
+		},
+		Users: []model.UserConfig{
+			{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA test"}},
+		},
+	}
+
+	err := installer.Install(context.Background(), cfg, func(string) {})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify flatcar-install was called
+	var installCall *runner.SpyCall
+	for i := range spy.Calls {
+		if spy.Calls[i].Name == "flatcar-install" {
+			installCall = &spy.Calls[i]
+			break
+		}
+	}
+	if installCall == nil {
+		t.Fatal("flatcar-install was not called")
+	}
+}
+
 func TestWriteIgnitionFileCleanup(t *testing.T) {
 	spy := runner.NewSpyRunner()
 	installer := NewFlatcarInstaller(spy, testLogger())

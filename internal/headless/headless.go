@@ -256,7 +256,7 @@ func Run(ctx context.Context, cfg *Config, installer install.Installer, logger *
 	for i, u := range cfg.Users {
 		if u.GithubUser != "" {
 			fmt.Printf("→ Fetching SSH keys for GitHub user %q...\n", u.GithubUser)
-			keys, err := fetchGitHubKeys(ctx, u.GithubUser)
+			keys, err := fetchGitHubKeysFunc(ctx, u.GithubUser)
 			if err != nil {
 				return fmt.Errorf("fetching GitHub keys for %q: %w", u.GithubUser, err)
 			}
@@ -316,8 +316,7 @@ func Run(ctx context.Context, cfg *Config, installer install.Installer, logger *
 	return nil
 }
 
-// fetchGitHubKeys retrieves SSH keys for a GitHub user, respecting ctx cancellation.
-func fetchGitHubKeys(ctx context.Context, username string) ([]string, error) {
-	client := github.NewClient()
-	return client.FetchKeys(ctx, username)
+// fetchGitHubKeysFunc is the actual implementation used by Run; tests can replace it.
+var fetchGitHubKeysFunc = func(ctx context.Context, username string) ([]string, error) {
+	return github.NewClient().FetchKeys(ctx, username)
 }

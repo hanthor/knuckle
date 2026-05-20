@@ -3,6 +3,7 @@ package headless
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -412,5 +413,79 @@ func TestRun_ValidationFailure(t *testing.T) {
 	}
 	if installer.called {
 		t.Error("installer should not be called on validation failure")
+	}
+}
+
+func TestToInstallConfig_StaticNetwork(t *testing.T) {
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "static-node",
+		Timezone: "UTC",
+		Network: NetworkConfig{
+			Mode:      "static",
+			Interface: "eth0",
+			Address:   "192.168.1.50/24",
+			Gateway:   "192.168.1.1",
+		},
+		Users:          []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Disk:           "/dev/vdb",
+		UpdateStrategy: "off",
+	}
+
+	installCfg, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("ToInstallConfig: %v", err)
+	}
+
+	if installCfg.Network.Mode != model.NetworkStatic {
+		t.Errorf("mode: got %v, want Static", installCfg.Network.Mode)
+	}
+	if installCfg.Network.Interface != "eth0" {
+		t.Errorf("interface: got %q, want eth0", installCfg.Network.Interface)
+	}
+	if installCfg.Network.Address != "192.168.1.50/24" {
+		t.Errorf("address: got %q, want 192.168.1.50/24", installCfg.Network.Address)
+	}
+	if installCfg.Network.Gateway != "192.168.1.1" {
+		t.Errorf("gateway: got %q, want 192.168.1.1", installCfg.Network.Gateway)
+	}
+}
+
+func TestRun_GitHubUser(t *testing.T) {
+	const fakeKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGitHubKey github-test-key"
+
+	old := fetchGitHubKeysFunc
+	fetchGitHubKeysFunc = func(_ context.Context, username string) ([]string, error) {
+		if username != "testuser" {
+			return nil, fmt.Errorf("unexpected username %q", username)
+		}
+		return []string{fakeKey}, nil
+	}
+	defer func() { fetchGitHubKeysFunc = old }()
+
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "gh-node",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users: []UserConfig{{
+			Username:   "core",
+			GithubUser: "testuser",
+		}},
+		Disk:   "/dev/vdb",
+		DryRun: true,
+	}
+
+	installer := &mockInstaller{}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	err := Run(context.Background(), cfg, installer, logger)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !installer.called {
+		t.Error("installer.Install was not called")
+	}
+	if len(cfg.Users[0].SSHKeys) == 0 || cfg.Users[0].SSHKeys[0] != fakeKey {
+		t.Errorf("SSH keys not populated from GitHub: %v", cfg.Users[0].SSHKeys)
 	}
 }
