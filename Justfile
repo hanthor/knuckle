@@ -236,7 +236,7 @@ e2e:
     echo "  → After install: just boot-target"
     echo ""
     {{QEMU}} \
-        -m 4096 -smp 2 -enable-kvm \
+        -m 4096 -smp 2 -enable-kvm -cpu host \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
         -cdrom "$ISO" \
         -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
@@ -271,7 +271,7 @@ boot-iso:
     echo "  → GTK window shows VGA console (tty1) where knuckle TUI runs"
     echo ""
     {{QEMU}} \
-        -m 4096 -smp 2 -enable-kvm \
+        -m 4096 -smp 2 -enable-kvm -cpu host \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
         -cdrom "$ISO" \
         -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \

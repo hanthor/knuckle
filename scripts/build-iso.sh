@@ -35,11 +35,11 @@ OUTPUT_DIR="$ROOT_DIR/output"
 
 if [[ -n "$BINARY_OVERRIDE" ]]; then
     BINARY="$BINARY_OVERRIDE"
-elif [[ -f "$ROOT_DIR/knuckle" ]]; then
-    # CI: built binary placed at repo root
-    BINARY="$ROOT_DIR/knuckle"
-else
+elif [[ -f "$ROOT_DIR/bin/knuckle" ]]; then
     BINARY="$ROOT_DIR/bin/knuckle"
+elif [[ -f "$ROOT_DIR/knuckle" ]]; then
+    # CI fallback: binary placed at repo root (no bin/ dir in CI artifacts)
+    BINARY="$ROOT_DIR/knuckle"
 fi
 
 if [[ "$CHANNEL" == "lts" ]]; then
@@ -106,46 +106,66 @@ fi
 echo "  kernel : $(du -h "$KERNEL"  | cut -f1)"
 echo "  initrd : $(du -h "$INITRD"  | cut -f1)"
 
-# ── 3. Build supplemental cpio overlay ───────────────────────────────────────
-echo "[3/5] Building knuckle overlay..."
+# ── 3. Inject knuckle into Flatcar usr.squashfs ───────────────────────────────
+# Flatcar PXE initrd = cpio(etc/ + usr.squashfs).  The squashfs is mounted at
+# /usr/ in the live environment.  We unpack it, add our binary + systemd units,
+# and repack.  The modified initrd is self-contained — no network, no Ignition,
+# no fw_cfg tricks needed.
+#
+# Cache: squashfs is only rebuilt when the knuckle binary changes.
+BINARY_HASH=$(sha256sum "$BINARY" | cut -c1-16)
+MODIFIED_SQUASH="$BUILD_DIR/usr-modified-${BINARY_HASH}.squashfs"
+MODIFIED_INITRD="$BUILD_DIR/modified-initrd-${BINARY_HASH}.cpio.gz"
 
-OVERLAY_DIR="$BUILD_DIR/overlay"
-rm -rf "$OVERLAY_DIR"
+if [[ -f "$MODIFIED_INITRD" ]]; then
+    echo "[3/5] Using cached modified initrd (binary unchanged)."
+else
+    echo "[3/5] Injecting knuckle into Flatcar squashfs..."
+    # Remove stale cached files from previous binary versions
+    rm -f "$BUILD_DIR"/usr-modified-*.squashfs "$BUILD_DIR"/modified-initrd-*.cpio.gz
 
-# Flatcar PXE uses dracut dmsquash-live: after mounting usr.squashfs as the live
-# rootfs, dracut's apply-live-updates.sh checks for [ -d /updates ] in the initramfs
-# and copies everything under updates/ into the new rootfs.  All overlay files MUST
-# live under updates/ in the cpio — bare paths in the initramfs are abandoned at pivot.
-UPDATES="$OVERLAY_DIR/updates"
-mkdir -p \
-    "$UPDATES/opt" \
-    "$UPDATES/etc/systemd/system/multi-user.target.wants" \
-    "$UPDATES/etc/systemd/system/getty@tty1.service.d"
+    SQUASH_WORK="$BUILD_DIR/squash-work"
+    rm -rf "$SQUASH_WORK"
+    mkdir -p "$SQUASH_WORK"
 
-cp "$BINARY" "$UPDATES/opt/knuckle"
-chmod 755 "$UPDATES/opt/knuckle"
+    # Extract usr.squashfs (and the empty etc/) from the Flatcar PXE cpio
+    echo "  extracting squashfs from initrd..."
+    (cd "$SQUASH_WORK" && zcat "$INITRD" | cpio -id --quiet 2>/dev/null)
 
-# Autologin on tty1 so Flatcar logs in as core without a password prompt.
-# The flatcar.autologin= kernel param is a dracut param that only works in PXE netboot,
-# not when booting from our cpio overlay.  We wire it ourselves via a drop-in.
-cat > "$UPDATES/etc/systemd/system/getty@tty1.service.d/autologin.conf" <<'DROPIN'
+    # Unpack the squashfs into squashfs-root/ (= Flatcar's /usr/ tree)
+    # -no-xattrs: skip SELinux xattrs (require root); Flatcar doesn't enforce SELinux
+    echo "  unpacking squashfs ($(du -h "$SQUASH_WORK/usr.squashfs" | cut -f1))..."
+    unsquashfs -no-xattrs -d "$SQUASH_WORK/squashfs-root" "$SQUASH_WORK/usr.squashfs" > /dev/null 2>&1
+
+    SR="$SQUASH_WORK/squashfs-root"   # = /usr/ in the live system
+
+    # Install knuckle binary at /usr/bin/knuckle
+    cp "$BINARY" "$SR/bin/knuckle"
+    chmod 755 "$SR/bin/knuckle"
+
+    # Install systemd units at /usr/lib/systemd/system/
+    mkdir -p \
+        "$SR/lib/systemd/system/multi-user.target.wants" \
+        "$SR/lib/systemd/system/getty@tty1.service.d"
+
+    # Autologin core on tty1 so the TUI gets a real PTY immediately
+    cat > "$SR/lib/systemd/system/getty@tty1.service.d/autologin.conf" <<'DROPIN'
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty --autologin core --noclear %I $TERM
 DROPIN
 
-cat > "$UPDATES/etc/systemd/system/knuckle-installer.service" <<'UNIT'
+    cat > "$SR/lib/systemd/system/knuckle-installer.service" <<'UNIT'
 [Unit]
 Description=Knuckle Flatcar Installer
 After=multi-user.target network-online.target
 Wants=network-online.target
 Conflicts=getty@tty1.service
-After=getty@tty1.service
-ConditionPathExists=/opt/knuckle
+ConditionPathExists=/usr/bin/knuckle
 
 [Service]
 Type=idle
-ExecStart=/opt/knuckle --log-file /tmp/knuckle.log
+ExecStart=/usr/bin/knuckle --log-file /tmp/knuckle.log
 StandardInput=tty
 StandardOutput=tty
 TTYPath=/dev/tty1
@@ -158,31 +178,32 @@ RestartSec=3
 WantedBy=multi-user.target
 UNIT
 
-ln -sf /etc/systemd/system/knuckle-installer.service \
-    "$UPDATES/etc/systemd/system/multi-user.target.wants/knuckle-installer.service"
+    ln -sf /usr/lib/systemd/system/knuckle-installer.service \
+        "$SR/lib/systemd/system/multi-user.target.wants/knuckle-installer.service"
 
-# Optional: carry the build host's SSH key into the live environment
-if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
-    mkdir -p "$UPDATES/home/core/.ssh"
-    cp "$HOME/.ssh/id_ed25519.pub" "$UPDATES/home/core/.ssh/authorized_keys"
-    chmod 700 "$UPDATES/home/core/.ssh"
-    chmod 600 "$UPDATES/home/core/.ssh/authorized_keys"
+    # Repack the squashfs (lz4 for speed; -no-xattrs since we extracted without them)
+    echo "  repacking squashfs..."
+    mksquashfs "$SR" "$MODIFIED_SQUASH" -noappend -comp lz4 -no-xattrs -quiet
+
+    # Rebuild the initrd cpio: etc/ (empty, from original) + modified usr.squashfs
+    echo "  repacking initrd cpio..."
+    (
+        cd "$SQUASH_WORK"
+        cp "$MODIFIED_SQUASH" usr.squashfs
+        { echo .; find etc usr.squashfs; } | cpio -o -H newc --quiet | gzip > "$MODIFIED_INITRD"
+    )
+    rm -rf "$SQUASH_WORK"
+    echo "  done: $(du -h "$MODIFIED_INITRD" | cut -f1)"
 fi
-
-OVERLAY_CPIO="$BUILD_DIR/knuckle-overlay.cpio.gz"
-(cd "$OVERLAY_DIR" && find . | cpio -o -H newc 2>/dev/null | gzip > "$OVERLAY_CPIO")
-echo "  overlay: $(du -h "$OVERLAY_CPIO" | cut -f1)"
-
-# Concatenate: Linux supports multiple cpio archives in initramfs
-COMBINED_INITRD="$BUILD_DIR/combined-initrd.img"
-cat "$INITRD" "$OVERLAY_CPIO" > "$COMBINED_INITRD"
-echo "  combined: $(du -h "$COMBINED_INITRD" | cut -f1)"
 
 # ── 4. Build FAT32 ESP with systemd-boot ─────────────────────────────────────
 echo "[4/5] Building EFI System Partition (systemd-boot)..."
 
-# Size: kernel + combined-initrd + small EFI binary + BLS files + 32 MB slack
-INITRD_SIZE=$(stat -c%s "$COMBINED_INITRD")
+ISO_DIR="$BUILD_DIR/iso-root"
+rm -rf "$ISO_DIR"
+mkdir -p "$ISO_DIR"
+
+INITRD_SIZE=$(stat -c%s "$MODIFIED_INITRD")
 KERNEL_SIZE=$(stat -c%s "$KERNEL")
 ESP_SIZE_MB=$(( (INITRD_SIZE + KERNEL_SIZE + 32*1024*1024) / 1024 / 1024 ))
 
@@ -197,32 +218,26 @@ mcopy -i "$EFI_IMG" "$SDBOOT_EFI" ::/EFI/BOOT/BOOTX64.EFI
 # systemd-boot configuration (BLS)
 mmd -i "$EFI_IMG" ::/loader ::/loader/entries
 
-# loader.conf — timeout + default
 printf 'default knuckle\ntimeout 5\neditor no\n' \
     | mcopy -i "$EFI_IMG" - ::/loader/loader.conf
 
-# Primary entry: dual console (VGA + serial)
-printf 'title   Knuckle \xe2\x80\x93 Install Flatcar Container Linux\nlinux   /vmlinuz\ninitrd  /initrd.img\noptions flatcar.autologin=tty1 console=tty0 console=ttyS0,115200n8 quiet\n' \
+# Primary entry: VGA + serial console
+printf 'title   Knuckle \xe2\x80\x93 Install Flatcar Container Linux\nlinux   /vmlinuz\ninitrd  /initrd.img\noptions console=tty0 console=ttyS0,115200n8\n' \
     | mcopy -i "$EFI_IMG" - ::/loader/entries/knuckle.conf
 
-# Alternate entry: serial console only (headless servers)
-printf 'title   Knuckle \xe2\x80\x93 Install Flatcar (serial console)\nlinux   /vmlinuz\ninitrd  /initrd.img\noptions flatcar.autologin=ttyS0 console=ttyS0,115200n8\n' \
+# Alternate entry: serial only (headless servers)
+printf 'title   Knuckle \xe2\x80\x93 Install Flatcar (serial console)\nlinux   /vmlinuz\ninitrd  /initrd.img\noptions console=ttyS0,115200n8\n' \
     | mcopy -i "$EFI_IMG" - ::/loader/entries/knuckle-serial.conf
 
-# Kernel + initrd live inside the ESP (not duplicated in iso-root/)
 mcopy -i "$EFI_IMG" "$KERNEL"          ::/vmlinuz
-mcopy -i "$EFI_IMG" "$COMBINED_INITRD" ::/initrd.img
+mcopy -i "$EFI_IMG" "$MODIFIED_INITRD" ::/initrd.img
 
 echo "  ESP : $(du -h "$EFI_IMG" | cut -f1)"
 
 # ── 5. Assemble ISO ───────────────────────────────────────────────────────────
 echo "[5/5] Assembling ISO..."
 
-ISO_DIR="$BUILD_DIR/iso-root"
-rm -rf "$ISO_DIR"
-mkdir -p "$ISO_DIR"
-
-# Only the ESP image goes into iso-root/; kernel+initrd are inside the ESP.
+# iso-root/ contains only the ESP image; all content is in the ESP.
 cp "$EFI_IMG" "$ISO_DIR/efi.img"
 
 mkdir -p "$OUTPUT_DIR"
