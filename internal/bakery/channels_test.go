@@ -2,8 +2,6 @@ package bakery
 
 import (
 	"context"
-	"crypto/sha512"
-	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -302,9 +300,4 @@ func TestVerificationStatusInChannelInfo(t *testing.T) {
 	if !info.SignedDigest {
 		t.Error("SignedDigest should be true — signature should verify with ProtonMail/go-crypto")
 	}
-}
-
-func sha512Hash(content string) string {
-	h := sha512.Sum512([]byte(content))
-	return hex.EncodeToString(h[:])
 }
