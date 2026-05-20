@@ -8,7 +8,7 @@
 
 ```
                 ┌────────────────────────────────────────┐
-                │   VM e2e  (automated, 3-pass)           │   just vm-e2e
+                │   VM e2e  (automated, 4-pass)           │   just vm-e2e
                 └──────────────────┬─────────────────────┘
                  ┌─────────────────┴──────────────────────┐
                  │  Headless e2e  (config generation)     │   just headless-test
@@ -30,7 +30,7 @@
 | Golden      |     ✅      | Ignition output stability (regenerate with `-update`)          |
 | Headless e2e|     ✅      | `just headless-test` — build + canned JSON, validates config generation |
 | Integration |     ❌      | Tagged `//go:build integration`. Real HTTP to GitHub + Flatcar |
-| VM e2e      |     ❌      | Requires QEMU + KVM; dev-machine only; automated 3-pass recipe |
+| VM e2e      |     ❌      | Requires QEMU + KVM; dev-machine only; automated 4-pass recipe |
 
 ## Coverage Gate
 
@@ -132,7 +132,7 @@ If `just ci` passes locally but fails in CI, the gap is one of:
 
 ## VM e2e Passes
 
-`just vm-e2e` runs three automated passes in sequence inside QEMU (no manual
+`just vm-e2e` runs four automated passes in sequence inside QEMU (no manual
 intervention required). Each pass builds a fresh overlay image, installs via
 `knuckle --headless --config`, boots the installed system, and SSH-verifies the result.
 
@@ -141,6 +141,7 @@ intervention required). Each pass builds a fresh overlay image, installs via
 | DHCP          | DHCP networking, hostname, update groups  | hostname, OEM update strategy, locksmith enabled      | 15m     |
 | Static        | Static IP 10.0.2.15/24, gw 10.0.2.2      | `/etc/systemd/network/10-static.network` content      | 15m     |
 | Sysext        | DHCP + docker sysext                      | `/etc/extensions/docker.raw` present, `docker version` runs | 25m |
+| NVIDIA        | DHCP + NVIDIA GPU config (emulated)       | `/etc/sysupdate.d/nv-*.conf` present, kernel module config | 15m |
 
 The static pass uses QEMU's slirp NAT subnet so SSH port-forwarding still works
 even with a static IP configured inside the VM. Interface name is currently

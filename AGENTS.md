@@ -50,7 +50,7 @@ just cover        # statement coverage profile → cover.out, prints total
 just cover-check  # per-package coverage threshold gate
 just headless-test       # build + run a canned JSON config (CI gate, runs on host)
 just vm                  # install in QEMU VM → auto-boots installed system after
-just vm-e2e              # automated: headless install → boot → verify SSH + hostname
+just vm-e2e              # automated 4-pass: DHCP · static · sysext · NVIDIA
 just boot-iso            # build ISO → boot in QEMU GTK window (requires -cpu host; uses bin/knuckle)
 just e2e                 # build ISO → boot in QEMU GTK window → interactive install
 ```
@@ -160,7 +160,7 @@ tui      ← cmd/knuckle
 | Integration  | `//go:build integration` (not in CI)   | Real network: GitHub API, Flatcar release server    |
 | Headless e2e | `just headless-test`                   | Build + canned JSON config, runs on host (CI gate)  |
 | VM           | `just vm`                              | Install in QEMU, auto-boots installed system after  |
-| VM automated | `just vm-e2e`                          | 3-pass: DHCP, static network, sysext (docker) — fully automated |
+| VM automated | `just vm-e2e`                          | 4-pass: DHCP, static network, sysext (docker), NVIDIA — fully automated |
 | ISO e2e      | `just e2e`                             | Build ISO → boot in QEMU → interactive install      |
 
 CI today runs unit + race + lint + vuln + coverage gate. Integration and VM
@@ -278,6 +278,7 @@ Individual gates (all exercised by `just ci`):
 - [ ] `go test -race ./...` — all 12 packages green
 - [ ] `just cover-check` — all packages above gate thresholds
 - [ ] `just headless-test` — config generation e2e passes (runs on host)
+- [ ] `just vm-e2e` — all 4 passes green (DHCP, static, sysext, NVIDIA)
 - [ ] `just build` — binary compiles
 - [ ] `git status` clean — no untracked files in repo
 - [ ] `grep -rn 'exec\.Command' --include='*.go' --exclude-dir=internal/runner .`
@@ -291,7 +292,7 @@ B4 (SSH keys not reaching Ignition) ✓. No open blockers for 1.0.
 **VM verification (required before release tag):**
 ```bash
 just vm      # go through the full TUI, confirm install completes and SSH works
-just vm-e2e  # automated pass — must exit 0
+just vm-e2e  # automated 4-pass — must exit 0 (DHCP · static · sysext · NVIDIA)
 ```
 
 The most recent review record is `docs/REVIEW-2026-05-20.md`.
@@ -324,7 +325,7 @@ sudo systemctl reboot               # apply (if REBOOT_STRATEGY=off)
 **Release tag checklist:**
 1. `just tools && just ci` — must be green
 2. `just vm` — manual install walkthrough, confirm SSH works on installed system
-3. `just vm-e2e` — must exit 0
+3. `just vm-e2e` — all 4 passes must exit 0 (DHCP · static · sysext · NVIDIA)
 4. `git tag v0.X.Y && git push origin v0.X.Y` — triggers release.yml
 
 ---
