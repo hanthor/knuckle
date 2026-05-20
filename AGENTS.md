@@ -18,7 +18,7 @@ off to `flatcar-install` — knuckle never writes partitions itself.
 
 - **Module:** `github.com/castrojo/knuckle` (Go 1.26+)
 - **License:** Apache-2.0
-- **Status:** feature-complete; all 12 packages pass `go test -race ./...`.
+- **Status:** v0.2.1 released; install → reboot → SSH verified end-to-end in QEMU.
 - **Distribution:** `knuckle` binary + installer ISO produced from
   `.github/workflows/release.yml` on `v*` tags.
 
@@ -277,7 +277,7 @@ Individual gates (all exercised by `just ci`):
 - [ ] `go tool govulncheck ./...` — `No vulnerabilities found.`
 - [ ] `go test -race ./...` — all 12 packages green
 - [ ] `just cover-check` — all packages above gate thresholds
-- [ ] `just headless-test` — dry-run end-to-end passes
+- [ ] `just headless-test` — config generation e2e passes (runs on host)
 - [ ] `just build` — binary compiles
 - [ ] `git status` clean — no untracked files in repo
 - [ ] `grep -rn 'exec\.Command' --include='*.go' --exclude-dir=internal/runner .`
@@ -285,10 +285,47 @@ Individual gates (all exercised by `just ci`):
 - [ ] All claims in `README.md` still true
 - [ ] `docs/REVIEW-*.md` reconciled — every blocker fixed or deferred with issue
 
-**Blockers status (as of v0.2.1):** B1 (GPG) ✓ CLOSED, B2 (reboot runner) ✓ CLOSED,
-B3 (headless disk path) ✓ CLOSED. No open blockers for 1.0.
+**Blockers status:** B1 (GPG) ✓, B2 (reboot runner) ✓, B3 (headless disk path) ✓,
+B4 (SSH keys not reaching Ignition) ✓. No open blockers for 1.0.
+
+**VM verification (required before release tag):**
+```bash
+just vm      # go through the full TUI, confirm install completes and SSH works
+just vm-e2e  # automated pass — must exit 0
+```
 
 The most recent review record is `docs/REVIEW-2026-05-19.md`.
+
+---
+
+## Routine Maintenance
+
+**Dependency bumps** — bump, run `just ci`, verify `just vm` still works:
+```bash
+go get -u ./...
+go mod tidy
+just ci
+just vm
+```
+
+**Tool version bumps** — update `GOLANGCI_LINT_VERSION` in Justfile AND
+`.github/workflows/ci.yml` together, then `just tools && just ci`.
+
+**Flatcar release tracking** — bakery fetches current versions live; no manual
+update needed. To force a check: `go test ./internal/bakery/... -run TestFetch`.
+
+**Flatcar manual update on a running node:**
+```bash
+sudo update_engine_client -update   # trigger download
+sudo update_engine_client -status   # watch progress
+sudo systemctl reboot               # apply (if REBOOT_STRATEGY=off)
+```
+
+**Release tag checklist:**
+1. `just tools && just ci` — must be green
+2. `just vm` — manual install walkthrough, confirm SSH works on installed system
+3. `just vm-e2e` — must exit 0
+4. `git tag v0.X.Y && git push origin v0.X.Y` — triggers release.yml
 
 ---
 
