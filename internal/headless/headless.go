@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/castrojo/knuckle/internal/bakery"
 	"github.com/castrojo/knuckle/internal/github"
 	"github.com/castrojo/knuckle/internal/install"
 	"github.com/castrojo/knuckle/internal/model"
@@ -133,6 +134,32 @@ func (c *Config) ToInstallConfig() (*model.InstallConfig, error) {
 	return cfg, nil
 }
 
+// resolveSysexts fetches the bakery catalog and matches each requested sysext
+// name to its catalog entry. Returns error if any name is not found.
+func resolveSysexts(ctx context.Context, names []string, client bakery.Client) ([]model.SysextEntry, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	catalog, err := client.FetchCatalog(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching sysext catalog: %w", err)
+	}
+	index := make(map[string]model.SysextEntry, len(catalog))
+	for _, e := range catalog {
+		index[e.Name] = e
+	}
+	var resolved []model.SysextEntry
+	for _, name := range names {
+		e, ok := index[name]
+		if !ok {
+			return nil, fmt.Errorf("sysext %q not found in catalog", name)
+		}
+		e.Selected = true
+		resolved = append(resolved, e)
+	}
+	return resolved, nil
+}
+
 // Validate checks the headless config for errors using the same validation
 // as the TUI wizard path.
 func (c *Config) Validate() error {
@@ -233,6 +260,7 @@ func (c *Config) Validate() error {
 // Run executes the headless install flow:
 // 1. Validate config
 // 2. Resolve GitHub SSH keys (if any)
+// 2b. Resolve sysext names → catalog entries (if any)
 // 3. Convert to InstallConfig
 // 4. Run full validation (consistency check)
 // 5. Execute install
@@ -268,11 +296,24 @@ func Run(ctx context.Context, cfg *Config, installer install.Installer, logger *
 		}
 	}
 
+	// Step 2b: Resolve sysext names to catalog entries
+	var resolvedSysexts []model.SysextEntry
+	if len(cfg.Sysexts) > 0 {
+		fmt.Printf("→ Resolving %d sysext(s) from catalog...\n", len(cfg.Sysexts))
+		var serr error
+		resolvedSysexts, serr = resolveSysexts(ctx, cfg.Sysexts, newBakeryClientFunc())
+		if serr != nil {
+			return fmt.Errorf("resolving sysexts: %w", serr)
+		}
+		fmt.Printf("  ✓ %d sysext(s) resolved\n", len(resolvedSysexts))
+	}
+
 	// Step 3: Convert to InstallConfig
 	installCfg, err := cfg.ToInstallConfig()
 	if err != nil {
 		return fmt.Errorf("converting config: %w", err)
 	}
+	installCfg.Sysexts = resolvedSysexts
 
 	// Step 4: Full consistency check
 	fmt.Println("→ Running consistency checks...")
@@ -319,4 +360,9 @@ func Run(ctx context.Context, cfg *Config, installer install.Installer, logger *
 // fetchGitHubKeysFunc is the actual implementation used by Run; tests can replace it.
 var fetchGitHubKeysFunc = func(ctx context.Context, username string) ([]string, error) {
 	return github.NewClient().FetchKeys(ctx, username)
+}
+
+// newBakeryClientFunc returns the bakery client used by Run; tests can replace it.
+var newBakeryClientFunc = func() bakery.Client {
+	return bakery.NewHTTPClient()
 }

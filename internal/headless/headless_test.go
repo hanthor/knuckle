@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"log/slog"
 
+	"github.com/castrojo/knuckle/internal/bakery"
 	"github.com/castrojo/knuckle/internal/model"
 )
 
@@ -365,10 +367,12 @@ func TestToInstallConfig_Defaults(t *testing.T) {
 type mockInstaller struct {
 	installErr error
 	called     bool
+	lastCfg    *model.InstallConfig
 }
 
 func (m *mockInstaller) Install(ctx context.Context, cfg *model.InstallConfig, progress func(string)) error {
 	m.called = true
+	m.lastCfg = cfg
 	progress("mock step 1")
 	progress("mock step 2")
 	return m.installErr
@@ -489,3 +493,123 @@ func TestRun_GitHubUser(t *testing.T) {
 		t.Errorf("SSH keys not populated from GitHub: %v", cfg.Users[0].SSHKeys)
 	}
 }
+
+func mockBakery(entries []model.SysextEntry, err error) func() {
+	old := newBakeryClientFunc
+	newBakeryClientFunc = func() bakery.Client {
+		return &bakery.MockClient{Entries: entries, Err: err}
+	}
+	return func() { newBakeryClientFunc = old }
+}
+
+func TestResolveSysexts_Success(t *testing.T) {
+	catalog := []model.SysextEntry{
+		{Name: "docker", Version: "24.0.7", URL: "https://example.com/docker-24.0.7.raw"},
+		{Name: "tailscale", Version: "1.56.1", URL: "https://example.com/tailscale-1.56.1.raw"},
+	}
+	defer mockBakery(catalog, nil)()
+
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "sysext-node",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users:    []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Disk:     "/dev/vdb",
+		Sysexts:  []string{"docker", "tailscale"},
+		DryRun:   true,
+	}
+
+	installer := &mockInstaller{}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	if err := Run(context.Background(), cfg, installer, logger); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !installer.called {
+		t.Error("installer.Install was not called")
+	}
+	// Verify sysexts were passed to install with Selected=true
+	installCfg := installer.lastCfg
+	if installCfg == nil {
+		t.Fatal("no install config captured")
+	}
+	if len(installCfg.Sysexts) != 2 {
+		t.Fatalf("expected 2 sysexts, got %d", len(installCfg.Sysexts))
+	}
+	if installCfg.Sysexts[0].Name != "docker" || !installCfg.Sysexts[0].Selected {
+		t.Errorf("docker sysext wrong: %+v", installCfg.Sysexts[0])
+	}
+	if installCfg.Sysexts[1].Name != "tailscale" || !installCfg.Sysexts[1].Selected {
+		t.Errorf("tailscale sysext wrong: %+v", installCfg.Sysexts[1])
+	}
+}
+
+func TestResolveSysexts_NotFound(t *testing.T) {
+	catalog := []model.SysextEntry{
+		{Name: "docker", URL: "https://example.com/docker.raw"},
+	}
+	defer mockBakery(catalog, nil)()
+
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{Mode: "dhcp"},
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Sysexts: []string{"nonexistent-sysext"},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	err := Run(context.Background(), cfg, &mockInstaller{}, logger)
+	if err == nil {
+		t.Fatal("expected error for unknown sysext name")
+	}
+	if !strings.Contains(err.Error(), "nonexistent-sysext") {
+		t.Errorf("error should name the missing sysext, got: %v", err)
+	}
+}
+
+func TestResolveSysexts_CatalogError(t *testing.T) {
+	defer mockBakery(nil, fmt.Errorf("network timeout"))()
+
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{Mode: "dhcp"},
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Sysexts: []string{"docker"},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	err := Run(context.Background(), cfg, &mockInstaller{}, logger)
+	if err == nil {
+		t.Fatal("expected error when bakery is unavailable")
+	}
+}
+
+func TestResolveSysexts_Empty(t *testing.T) {
+	// No bakery call should happen when sysexts list is empty
+	called := false
+	old := newBakeryClientFunc
+	newBakeryClientFunc = func() bakery.Client {
+		called = true
+		return &bakery.MockClient{}
+	}
+	defer func() { newBakeryClientFunc = old }()
+
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{Mode: "dhcp"},
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Sysexts: []string{}, // explicitly empty
+		DryRun:  true,
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	if err := Run(context.Background(), cfg, &mockInstaller{}, logger); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if called {
+		t.Error("bakery client should not be called when sysexts list is empty")
+	}
+}
+

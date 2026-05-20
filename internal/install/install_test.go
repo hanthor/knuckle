@@ -363,6 +363,42 @@ func TestInstallWithStaticNetwork(t *testing.T) {
 	}
 }
 
+func TestInstallWithSysexts(t *testing.T) {
+	spy := runner.NewSpyRunner()
+	installer := NewFlatcarInstaller(spy, testLogger())
+	cfg := &model.InstallConfig{
+		Channel:  "stable",
+		Hostname: "sysext-node",
+		Disk:     model.DiskInfo{DevPath: "/dev/vda"},
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA k"}}},
+		Sysexts: []model.SysextEntry{
+			{Name: "docker", Version: "24.0.7", URL: "https://github.com/flatcar/sysext-bakery/releases/download/latest/docker-24.0.7-x86-64.raw", Selected: true},
+			{Name: "tailscale", Version: "1.56.1", URL: "https://github.com/flatcar/sysext-bakery/releases/download/latest/tailscale-1.56.1-x86-64.raw", Selected: true},
+		},
+	}
+
+	err := installer.Install(context.Background(), cfg, func(string) {})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var installCall *runner.SpyCall
+	for i := range spy.Calls {
+		if spy.Calls[i].Name == "flatcar-install" {
+			installCall = &spy.Calls[i]
+			break
+		}
+	}
+	if installCall == nil {
+		t.Fatal("flatcar-install was not called")
+	}
+	// The ignition file passed to -i must have been generated (sysext URLs included)
+	if len(installCall.Args) < 5 || installCall.Args[4] != "-i" {
+		t.Errorf("expected -i flag in flatcar-install args: %v", installCall.Args)
+	}
+}
+
 func TestWriteIgnitionFileCleanup(t *testing.T) {
 	spy := runner.NewSpyRunner()
 	installer := NewFlatcarInstaller(spy, testLogger())

@@ -398,7 +398,103 @@ vm-e2e:
     echo ""
     echo "✅ vm-e2e STATIC pass PASSED"
     echo ""
-    echo "✅ ALL vm-e2e passes PASSED"
+    echo "✅ STATIC pass PASSED"
+
+    # ── Sysext pass ────────────────────────────────────────────────────────
+    # Installs with the docker sysext selected. Boots the installed system and
+    # verifies docker is available (proving Ignition downloaded + activated the sysext).
+    echo ""
+    echo "=== vm-e2e sysext pass ==="
+    echo ""
+
+    just _kill-vm
+    rm -f .vm/target-sysext.qcow2
+    qemu-img create -f qcow2 .vm/target-sysext.qcow2 20G >/dev/null
+    rm -f .vm/boot.qcow2
+    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base.img" -F qcow2 .vm/boot.qcow2 >/dev/null
+
+    # docker sysext — knuckle resolves the name to a real URL via bakery catalog
+    printf '{"channel":"stable","hostname":"e2e-sysext","timezone":"UTC","network":{"mode":"dhcp"},"users":[{"username":"core","ssh_keys":["%s"]}],"disk":"/dev/vdb","sysexts":["docker"],"update_strategy":"off","reboot":false}\n' \
+        "$E2E_PUB" > .vm/e2e-sysext-config.json
+
+    echo "[1/4] Booting installer VM (sysext pass)..."
+    {{QEMU}} \
+        -m 4096 -smp 2 -enable-kvm \
+        -drive if=virtio,file=.vm/boot.qcow2,format=qcow2 \
+        -drive if=virtio,file=.vm/target-sysext.qcow2,format=qcow2 \
+        -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/e2e-installer.ign \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid \
+        -serial file:.vm/e2e-sysext-installer-serial.log
+
+    ok=0
+    for i in $(seq 1 40); do
+        $E2E_SSH -o ConnectTimeout=3 true 2>/dev/null && ok=1 && break
+        sleep 3
+    done
+    [ "$ok" = "1" ] || { echo "❌ installer VM never came up"; tail -20 .vm/e2e-sysext-installer-serial.log 2>/dev/null; exit 1; }
+    echo "  ✓ installer VM ready"
+
+    echo "[2/4] Running headless install with docker sysext (downloads ~400MB + sysext)..."
+    $E2E_SCP .vm/e2e-sysext-config.json core@127.0.0.1:/tmp/e2e-sysext-config.json >/dev/null
+    if ! $E2E_SSH "timeout 25m sudo /tmp/knuckle --headless --config /tmp/e2e-sysext-config.json --log-file /tmp/knuckle-sysext.log"; then
+        echo "❌ sysext install failed — knuckle-sysext.log:"
+        $E2E_SSH "cat /tmp/knuckle-sysext.log" 2>/dev/null || true
+        exit 1
+    fi
+    echo "  ✓ sysext install completed"
+
+    echo "[3/4] Booting sysext-configured installed disk..."
+    just _kill-vm
+    sleep 1
+    {{QEMU}} \
+        -m 2048 -smp 2 -enable-kvm \
+        -drive if=virtio,file=.vm/target-sysext.qcow2,format=qcow2 \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid \
+        -serial file:.vm/e2e-sysext-target-serial.log
+
+    ok=0
+    for i in $(seq 1 60); do
+        $E2E_SSH -o ConnectTimeout=3 true 2>/dev/null && ok=1 && break
+        sleep 5
+    done
+    [ "$ok" = "1" ] || { echo "❌ sysext system never came up"; tail -20 .vm/e2e-sysext-target-serial.log 2>/dev/null; exit 1; }
+    echo "  ✓ sysext system SSH accessible"
+
+    echo "[4/4] Verifying docker sysext is active..."
+
+    # The .raw file must exist on disk (written by Ignition on first boot)
+    if $E2E_SSH "test -f /etc/extensions/docker.raw" 2>/dev/null; then
+        SYSEXT_SIZE=$($E2E_SSH "stat -c%s /etc/extensions/docker.raw" 2>/dev/null) || true
+        echo "  ✓ /etc/extensions/docker.raw present (${SYSEXT_SIZE} bytes)"
+    else
+        echo "❌ /etc/extensions/docker.raw not found — Ignition did not download sysext"
+        $E2E_SSH "ls /etc/extensions/ 2>/dev/null || echo '(no /etc/extensions/)'" || true
+        exit 1
+    fi
+
+    # systemd-sysext must be active
+    if $E2E_SSH "systemctl is-active systemd-sysext" 2>/dev/null | grep -q "^active"; then
+        echo "  ✓ systemd-sysext.service active"
+    else
+        SYSEXT_STATUS=$($E2E_SSH "systemctl status systemd-sysext --no-pager 2>&1" || true)
+        echo "  ⚠ systemd-sysext status: $SYSEXT_STATUS"
+    fi
+
+    # docker must be callable (proves the sysext overlay is live)
+    if DOCKER_VER=$($E2E_SSH "docker version --format '{{.Server.Version}}'" 2>/dev/null); then
+        echo "  ✓ docker available from sysext: $DOCKER_VER"
+    else
+        echo "❌ docker not available — sysext not activated"
+        $E2E_SSH "systemd-sysext list 2>/dev/null || true" || true
+        exit 1
+    fi
+
+    echo ""
+    echo "✅ SYSEXT pass PASSED"
+    echo ""
+    echo "✅ ALL vm-e2e passes PASSED (DHCP · static network · sysext)"
 
 # SSH into running VM
 ssh:

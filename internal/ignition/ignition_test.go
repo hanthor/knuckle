@@ -516,3 +516,42 @@ func TestGenerateButaneWithSysextSpecialCharsURL(t *testing.T) {
 		t.Error("URL should have escaped quotes")
 	}
 }
+
+func TestGenerateButaneNoSysexts_NoService(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "no-sysext-node",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA k"}}},
+		Sysexts:  []model.SysextEntry{},
+	}
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("GenerateButane: %v", err)
+	}
+	if strings.Contains(output, "systemd-sysext.service") {
+		t.Error("systemd-sysext.service must NOT be enabled when no sysexts selected")
+	}
+}
+
+func TestGenerateButaneUnselectedSysextsOmitService(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "unselected-node",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA k"}}},
+		Sysexts: []model.SysextEntry{
+			{Name: "docker", URL: "https://example.com/docker.raw", Selected: false},
+		},
+	}
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("GenerateButane: %v", err)
+	}
+	if strings.Contains(output, "systemd-sysext.service") {
+		t.Error("systemd-sysext.service must NOT be enabled when all sysexts are unselected")
+	}
+	if strings.Contains(output, "/etc/extensions/docker.raw") {
+		t.Error("unselected docker sysext must not appear in output")
+	}
+}
