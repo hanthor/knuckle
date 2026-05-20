@@ -45,19 +45,20 @@ func (s WizardStep) String() string {
 
 // InstallConfig is the complete installation configuration built by the wizard.
 type InstallConfig struct {
-	Arch           string // amd64 or arm64 (determined at ISO build time; default "amd64")
-	Channel        string // stable, beta, alpha, edge
-	Version        string // optional: pin to specific Flatcar version (flatcar-install -V)
-	Hostname       string
-	Timezone       string // e.g. "UTC", "America/New_York"
-	Network        NetworkConfig
-	Disk           DiskInfo
-	Users          []UserConfig
-	SSHKeys        []string // authorized_keys entries
-	Sysexts        []SysextEntry
-	UpdateStrategy UpdateStrategy
-	IgnitionURL    string // external ignition URL (mutually exclusive with local gen)
-	DryRun         bool
+	Arch                string // amd64 or arm64 (determined at ISO build time; default "amd64")
+	Channel             string // stable, beta, alpha, edge
+	Version             string // optional: pin to specific Flatcar version (flatcar-install -V)
+	Hostname            string
+	Timezone            string // e.g. "UTC", "America/New_York"
+	Network             NetworkConfig
+	Disk                DiskInfo
+	Users               []UserConfig
+	SSHKeys             []string // authorized_keys entries
+	Sysexts             []SysextEntry
+	UpdateStrategy      UpdateStrategy
+	IgnitionURL         string // external ignition URL (mutually exclusive with local gen)
+	NvidiaDriverVersion string // Flatcar NVIDIA kernel driver series, e.g. "570-open". Empty = none.
+	DryRun              bool
 }
 
 // UpdateStrategy holds OS update and reboot settings for Flatcar.
@@ -126,7 +127,31 @@ type UserConfig struct {
 	Groups       []string
 }
 
-// SysextEntry represents a system extension from the Flatcar Bakery.
+// NvidiaDriverSeries describes an available NVIDIA kernel driver series for Flatcar.
+// These are official Flatcar-built sysexts (kernel modules signed per Flatcar kernel
+// release), separate from the nvidia-runtime bakery sysext (Container Toolkit).
+// Activated via /etc/flatcar/enabled-sysext.conf at first boot.
+// See: https://www.flatcar.org/docs/latest/setup/customization/using-nvidia/
+type NvidiaDriverSeries struct {
+	// ID is the series identifier appended to "nvidia-drivers-" in enabled-sysext.conf.
+	// e.g. ID "570-open" → "nvidia-drivers-570-open".
+	ID          string
+	Label       string
+	Recommended bool
+}
+
+// NvidiaDriverOptions is the ordered list of available NVIDIA kernel driver series.
+// Latest / recommended is first. Update when Flatcar adds or drops a driver series.
+var NvidiaDriverOptions = []NvidiaDriverSeries{
+	{ID: "570-open", Label: "570 · open-source · RTX 20xx+ (recommended)", Recommended: true},
+	{ID: "550-open", Label: "550 · open-source · LTS branch"},
+	{ID: "535-open", Label: "535 · open-source · older LTS"},
+	{ID: "460", Label: "460 · proprietary · Kepler / Maxwell / Pascal GPUs"},
+}
+
+// DefaultNvidiaDriverSeries is the driver series selected when auto-detecting an NVIDIA GPU.
+const DefaultNvidiaDriverSeries = "570-open"
+
 type SysextEntry struct {
 	Name        string
 	Description string

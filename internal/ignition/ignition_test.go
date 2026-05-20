@@ -601,3 +601,78 @@ func TestGenerateButaneWithSysextSHA256(t *testing.T) {
 		t.Errorf("expected exactly 1 verification block (only wasmtime has a hash), got %d", count)
 	}
 }
+
+func TestGenerateButaneWithNvidiaDriverVersion(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname:            "gpu-node",
+		Network:             model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:               []model.UserConfig{{Username: "core"}},
+		NvidiaDriverVersion: "570-open",
+	}
+
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(output, "/etc/flatcar/enabled-sysext.conf") {
+		t.Error("expected /etc/flatcar/enabled-sysext.conf in output when NvidiaDriverVersion is set")
+	}
+	if !strings.Contains(output, "nvidia-drivers-570-open") {
+		t.Error("expected nvidia-drivers-570-open in enabled-sysext.conf content")
+	}
+}
+
+func TestGenerateButaneNoNvidiaWhenVersionEmpty(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "plain-node",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core"}},
+		// NvidiaDriverVersion is empty — no NVIDIA setup
+	}
+
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(output, "enabled-sysext.conf") {
+		t.Error("enabled-sysext.conf should NOT appear when NvidiaDriverVersion is empty")
+	}
+	if strings.Contains(output, "nvidia-drivers-") {
+		t.Error("nvidia-drivers- prefix should NOT appear when NvidiaDriverVersion is empty")
+	}
+}
+
+func TestGenerateButaneNvidiaWithSysexts(t *testing.T) {
+	// Verify that nvidia-runtime sysext + NvidiaDriverVersion produces both:
+	// 1. the sysext file entry (Container Toolkit download)
+	// 2. the enabled-sysext.conf entry (kernel driver)
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "full-gpu-node",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core"}},
+		Sysexts: []model.SysextEntry{
+			{Name: "nvidia-runtime", Version: "1.17.9",
+				URL: "https://extensions.flatcar.org/nvidia-runtime-v1.17.9-x86-64.raw", Selected: true},
+		},
+		NvidiaDriverVersion: "550-open",
+	}
+
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Container Toolkit sysext download
+	if !strings.Contains(output, "/etc/extensions/nvidia-runtime.raw") {
+		t.Error("expected nvidia-runtime.raw sysext download entry")
+	}
+	// Kernel driver activation
+	if !strings.Contains(output, "nvidia-drivers-550-open") {
+		t.Error("expected nvidia-drivers-550-open in enabled-sysext.conf")
+	}
+}

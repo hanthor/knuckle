@@ -333,8 +333,34 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.Wizard.State.CurrentStep == model.StepSysext && m.cursor < len(m.Wizard.State.Sysexts) {
 			m.Wizard.State.Sysexts[m.cursor].Selected = !m.Wizard.State.Sysexts[m.cursor].Selected
 			m.Wizard.State.Config.Sysexts = m.Wizard.State.Sysexts
+			// When toggling nvidia-runtime on/off, sync the driver version.
+			if m.Wizard.State.Sysexts[m.cursor].Name == "nvidia-runtime" {
+				if m.Wizard.State.Sysexts[m.cursor].Selected {
+					if m.Wizard.State.Config.NvidiaDriverVersion == "" {
+						m.Wizard.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+					}
+				} else {
+					m.Wizard.State.Config.NvidiaDriverVersion = ""
+				}
+			}
 		} else if len(m.fields) > 0 {
 			m.fields[m.fieldIdx].value += " "
+		}
+		return m, nil
+	case "[":
+		if m.Wizard.State.CurrentStep == model.StepSysext &&
+			m.cursor < len(m.Wizard.State.Sysexts) &&
+			m.Wizard.State.Sysexts[m.cursor].Name == "nvidia-runtime" &&
+			m.Wizard.State.Sysexts[m.cursor].Selected {
+			m.cycleNvidiaDriverVersion(-1)
+		}
+		return m, nil
+	case "]":
+		if m.Wizard.State.CurrentStep == model.StepSysext &&
+			m.cursor < len(m.Wizard.State.Sysexts) &&
+			m.Wizard.State.Sysexts[m.cursor].Name == "nvidia-runtime" &&
+			m.Wizard.State.Sysexts[m.cursor].Selected {
+			m.cycleNvidiaDriverVersion(1)
 		}
 		return m, nil
 	case "ctrl+b":
@@ -686,7 +712,7 @@ func (m *Model) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑↓/jk navigate • enter confirm • esc back • q quit"))
+	b.WriteString(helpStyle.Render("↑↓/jk navigate • space toggle • [ ] nvidia driver • enter confirm • esc back • q quit"))
 	return b.String()
 }
 
@@ -755,6 +781,12 @@ func (m *Model) viewSysext() string {
 		}
 	}
 	fmt.Fprintf(&b, "System Extensions — %d selected\n\n", selectedCount)
+
+	// Show GPU auto-detection notice if applicable.
+	if m.Wizard.State.NvidiaGPUDetected {
+		gpuStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("76"))
+		b.WriteString(gpuStyle.Render("  ✓ NVIDIA GPU detected — nvidia-runtime auto-selected") + "\n\n")
+	}
 
 	if len(m.Wizard.State.Sysexts) == 0 {
 		b.WriteString("  No extensions available (catalog fetch may have failed)\n")
@@ -875,6 +907,21 @@ func (m *Model) renderDetailPanel(ext model.SysextEntry) string {
 	lines = append(lines, fmt.Sprintf("Support:  %s", tier))
 	lines = append(lines, "")
 	lines = append(lines, wordWrap(longDesc, contentWidth)...)
+
+	// For nvidia-runtime, show the kernel driver version picker.
+	if ext.Name == "nvidia-runtime" && ext.Selected {
+		lines = append(lines, "")
+		lines = append(lines, "KERNEL DRIVER SERIES  ([ / ] to change):")
+		currentDriver := m.Wizard.State.Config.NvidiaDriverVersion
+		for _, opt := range model.NvidiaDriverOptions {
+			marker := "  "
+			if opt.ID == currentDriver {
+				marker = "> "
+			}
+			lines = append(lines, wordWrap(marker+opt.Label, contentWidth)...)
+		}
+	}
+
 	if len(caveats) > 0 {
 		lines = append(lines, "")
 		for _, c := range caveats {
@@ -902,6 +949,24 @@ func (m *Model) renderDetailPanel(ext model.SysextEntry) string {
 	b.WriteString(indent + bottom + "\n")
 
 	return b.String()
+}
+
+// cycleNvidiaDriverVersion advances the selected NVIDIA kernel driver series by delta (+1 or -1).
+func (m *Model) cycleNvidiaDriverVersion(delta int) {
+	opts := model.NvidiaDriverOptions
+	if len(opts) == 0 {
+		return
+	}
+	current := m.Wizard.State.Config.NvidiaDriverVersion
+	idx := 0
+	for i, opt := range opts {
+		if opt.ID == current {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + delta + len(opts)) % len(opts)
+	m.Wizard.State.Config.NvidiaDriverVersion = opts[idx].ID
 }
 
 // wordWrap splits s into lines of at most width runes, breaking on word boundaries.

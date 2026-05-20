@@ -65,15 +65,16 @@ func (g *Generator) GenerateButane(cfg *model.InstallConfig) (string, error) {
 	}
 
 	data := templateData{
-		Hostname:       cfg.Hostname,
-		Timezone:       cfg.Timezone,
-		Users:          cfg.Users,
-		SSHKeys:        cfg.SSHKeys,
-		Network:        cfg.Network,
-		Sysexts:        filterSelected(cfg.Sysexts),
-		Channel:        channel,
-		RebootStrategy: rebootStrategy,
-		HasPassword:    hasPassword,
+		Hostname:            cfg.Hostname,
+		Timezone:            cfg.Timezone,
+		Users:               cfg.Users,
+		SSHKeys:             cfg.SSHKeys,
+		Network:             cfg.Network,
+		Sysexts:             filterSelected(cfg.Sysexts),
+		Channel:             channel,
+		RebootStrategy:      rebootStrategy,
+		HasPassword:         hasPassword,
+		NvidiaDriverVersion: cfg.NvidiaDriverVersion,
 	}
 
 	var buf bytes.Buffer
@@ -85,15 +86,16 @@ func (g *Generator) GenerateButane(cfg *model.InstallConfig) (string, error) {
 }
 
 type templateData struct {
-	Hostname       string
-	Timezone       string
-	Users          []model.UserConfig
-	SSHKeys        []string
-	Network        model.NetworkConfig
-	Sysexts        []model.SysextEntry
-	Channel        string
-	RebootStrategy string
-	HasPassword    bool
+	Hostname            string
+	Timezone            string
+	Users               []model.UserConfig
+	SSHKeys             []string
+	Network             model.NetworkConfig
+	Sysexts             []model.SysextEntry
+	Channel             string
+	RebootStrategy      string
+	HasPassword         bool
+	NvidiaDriverVersion string // e.g. "570-open"; empty = no NVIDIA kernel driver setup
 }
 
 func filterSelected(sysexts []model.SysextEntry) []model.SysextEntry {
@@ -153,6 +155,14 @@ storage:
         verification:
           hash: "sha256-{{.Sha256}}"
 {{- end}}
+{{- end}}
+{{- if .NvidiaDriverVersion}}
+    - path: /etc/flatcar/enabled-sysext.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          nvidia-drivers-{{.NvidiaDriverVersion}}
 {{- end}}
 {{- if .Timezone}}
   links:

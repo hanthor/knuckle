@@ -143,3 +143,89 @@ func TestResolveByIDPathFallback(t *testing.T) {
 		t.Error("resolveByIDPath() returned empty string, should fallback to devPath")
 	}
 }
+
+func TestDetectNvidiaGPUs_NoDevices(t *testing.T) {
+	tmp := t.TempDir()
+	pciDevicesPath = tmp
+	defer func() { pciDevicesPath = "/sys/bus/pci/devices" }()
+
+	gpus := DetectNvidiaGPUs()
+	if len(gpus) != 0 {
+		t.Errorf("expected 0 GPUs in empty tmpdir, got %d", len(gpus))
+	}
+}
+
+func TestDetectNvidiaGPUs_NvidiaPresent(t *testing.T) {
+	tmp := t.TempDir()
+	pciDevicesPath = tmp
+	defer func() { pciDevicesPath = "/sys/bus/pci/devices" }()
+
+	// Create a fake NVIDIA 3D controller device.
+	devDir := tmp + "/0000:01:00.0"
+	if err := os.Mkdir(devDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(devDir+"/vendor", []byte("0x10de\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(devDir+"/class", []byte("0x030200\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	gpus := DetectNvidiaGPUs()
+	if len(gpus) != 1 {
+		t.Fatalf("expected 1 GPU, got %d", len(gpus))
+	}
+	if gpus[0].PCIAddress != "0000:01:00.0" {
+		t.Errorf("expected PCI address 0000:01:00.0, got %q", gpus[0].PCIAddress)
+	}
+	if gpus[0].PCIClass != "0x030200" {
+		t.Errorf("expected class 0x030200, got %q", gpus[0].PCIClass)
+	}
+}
+
+func TestDetectNvidiaGPUs_NonNvidiaIgnored(t *testing.T) {
+	tmp := t.TempDir()
+	pciDevicesPath = tmp
+	defer func() { pciDevicesPath = "/sys/bus/pci/devices" }()
+
+	// AMD GPU — should not be detected.
+	devDir := tmp + "/0000:02:00.0"
+	if err := os.Mkdir(devDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(devDir+"/vendor", []byte("0x1002\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(devDir+"/class", []byte("0x030000\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	gpus := DetectNvidiaGPUs()
+	if len(gpus) != 0 {
+		t.Errorf("expected 0 NVIDIA GPUs (AMD vendor), got %d", len(gpus))
+	}
+}
+
+func TestDetectNvidiaGPUs_NonDisplayClassIgnored(t *testing.T) {
+	tmp := t.TempDir()
+	pciDevicesPath = tmp
+	defer func() { pciDevicesPath = "/sys/bus/pci/devices" }()
+
+	// NVIDIA audio controller (not display class) — should not be detected.
+	devDir := tmp + "/0000:01:00.1"
+	if err := os.Mkdir(devDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(devDir+"/vendor", []byte("0x10de\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(devDir+"/class", []byte("0x040300\n"), 0644); err != nil { // audio controller
+		t.Fatal(err)
+	}
+
+	gpus := DetectNvidiaGPUs()
+	if len(gpus) != 0 {
+		t.Errorf("expected 0 GPUs (audio class, not display), got %d", len(gpus))
+	}
+}

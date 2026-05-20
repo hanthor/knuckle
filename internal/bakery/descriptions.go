@@ -181,12 +181,12 @@ var extensionCatalog = map[string]ExtensionMeta{
 	"nvidia-runtime": {
 		Category:    "GPU / Accelerators",
 		SupportTier: TierMaintained,
-		Short:       "NVIDIA Container Toolkit — GPU passthrough for containers. No kernel module or host CUDA.",
-		Long:        "Ships nvidia-container-runtime, nvidia-ctk, and libnvidia-container — the NVIDIA Container Toolkit userspace stack. Enables GPU access inside Docker and containerd containers via CDI (Container Device Interface). CUDA libraries are provided by your container images, not installed on the host. The NVIDIA kernel module must be installed separately using the Flatcar NVIDIA customization guide.",
+		Short:       "NVIDIA full GPU setup — kernel driver + Container Toolkit (x86-64 only)",
+		Long:        "Selecting this configures complete NVIDIA GPU support: (1) the Flatcar-official signed kernel module, activated via /etc/flatcar/enabled-sysext.conf at first boot, and (2) the NVIDIA Container Toolkit (nvidia-container-runtime, nvidia-ctk, libnvidia-container) from the bakery for GPU passthrough inside Docker and containerd containers. CUDA libraries come from your container images. Choose your kernel driver series with [ / ] below.",
 		Caveats: []string{
-			"NVIDIA kernel module NOT included — install separately via the Flatcar NVIDIA customization guide (flatcar.org/docs).",
-			"No CUDA on the host — CUDA libraries come from your container images, not this sysext.",
-			"x86-64 only — no arm64 builds are available from the bakery.",
+			"NVIDIA kernel module is the Flatcar-official signed driver sysext (not from the bakery) — knuckle writes /etc/flatcar/enabled-sysext.conf to activate it at first boot.",
+			"No CUDA on the host — CUDA libraries come from your container images (e.g. nvidia/cuda:12.x).",
+			"x86-64 only — no arm64 NVIDIA driver builds available from Flatcar or the bakery.",
 		},
 	},
 	"ollama": {

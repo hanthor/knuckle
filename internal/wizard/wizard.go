@@ -25,6 +25,11 @@ type State struct {
 	Interfaces []model.NetworkInterface
 	Sysexts    []model.SysextEntry
 
+	// NvidiaGPUDetected is true when an NVIDIA GPU was found on the installer host.
+	// Since knuckle installs to the machine it runs on, detected GPUs will be present
+	// on the installed system too — used to auto-select the nvidia-runtime sysext.
+	NvidiaGPUDetected bool
+
 	// Channel version info (fetched at startup)
 	Channels []bakery.ChannelInfo
 
@@ -199,7 +204,7 @@ func (w *Wizard) validateUser() error {
 	return nil
 }
 
-// ProbeHardware discovers disks and network interfaces
+// ProbeHardware discovers disks, network interfaces, and GPU hardware.
 func (w *Wizard) ProbeHardware(ctx context.Context) error {
 	disks, err := w.Prober.ListDisks(ctx)
 	if err != nil {
@@ -212,6 +217,9 @@ func (w *Wizard) ProbeHardware(ctx context.Context) error {
 		return fmt.Errorf("probing network: %w", err)
 	}
 	w.State.Interfaces = ifaces
+
+	// Detect NVIDIA GPUs via PCI sysfs — no driver required.
+	w.State.NvidiaGPUDetected = len(probe.DetectNvidiaGPUs()) > 0
 
 	// Run system checks after hardware probe
 	w.runSystemChecks()
@@ -275,12 +283,28 @@ func (w *Wizard) runSystemChecks() {
 }
 
 // FetchSysexts loads the sysext catalog for the configured architecture.
+// If an NVIDIA GPU was detected during ProbeHardware, nvidia-runtime is
+// auto-selected and the default driver series is pre-configured.
 func (w *Wizard) FetchSysexts(ctx context.Context) error {
 	sysexts, err := w.Bakery.FetchCatalogArch(ctx, w.State.Config.Arch)
 	if err != nil {
 		return fmt.Errorf("fetching sysext catalog: %w", err)
 	}
 	w.State.Sysexts = sysexts
+
+	// Auto-select nvidia-runtime when a GPU is detected on the installer host.
+	if w.State.NvidiaGPUDetected {
+		for i, s := range w.State.Sysexts {
+			if s.Name == "nvidia-runtime" {
+				w.State.Sysexts[i].Selected = true
+				w.State.Config.Sysexts = w.State.Sysexts
+				if w.State.Config.NvidiaDriverVersion == "" {
+					w.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+				}
+				break
+			}
+		}
+	}
 	return nil
 }
 

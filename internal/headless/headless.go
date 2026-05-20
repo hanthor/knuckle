@@ -20,19 +20,20 @@ import (
 // Config is the JSON schema for headless install configuration.
 // It maps closely to model.InstallConfig but uses simpler types for JSON.
 type Config struct {
-	Arch           string        `json:"arch,omitempty"` // "amd64" or "arm64"; defaults to "amd64"
-	Channel        string        `json:"channel"`
-	Version        string        `json:"version,omitempty"`
-	Hostname       string        `json:"hostname"`
-	Timezone       string        `json:"timezone,omitempty"`
-	Network        NetworkConfig `json:"network"`
-	Users          []UserConfig  `json:"users"`
-	Disk           string        `json:"disk"`
-	Sysexts        []string      `json:"sysexts,omitempty"`
-	UpdateStrategy string        `json:"update_strategy"`
-	IgnitionURL    string        `json:"ignition_url,omitempty"`
-	Reboot         bool          `json:"reboot"`
-	DryRun         bool          `json:"dry_run,omitempty"`
+	Arch                string        `json:"arch,omitempty"` // "amd64" or "arm64"; defaults to "amd64"
+	Channel             string        `json:"channel"`
+	Version             string        `json:"version,omitempty"`
+	Hostname            string        `json:"hostname"`
+	Timezone            string        `json:"timezone,omitempty"`
+	Network             NetworkConfig `json:"network"`
+	Users               []UserConfig  `json:"users"`
+	Disk                string        `json:"disk"`
+	Sysexts             []string      `json:"sysexts,omitempty"`
+	NvidiaDriverVersion string        `json:"nvidia_driver_version,omitempty"` // e.g. "570-open"; empty = no NVIDIA kernel driver
+	UpdateStrategy      string        `json:"update_strategy"`
+	IgnitionURL         string        `json:"ignition_url,omitempty"`
+	Reboot              bool          `json:"reboot"`
+	DryRun              bool          `json:"dry_run,omitempty"`
 }
 
 // NetworkConfig for JSON input.
@@ -112,6 +113,9 @@ func (c *Config) ToInstallConfig() (*model.InstallConfig, error) {
 
 	// IgnitionURL (mutually exclusive with local gen)
 	cfg.IgnitionURL = c.IgnitionURL
+
+	// NVIDIA kernel driver series (empty = no NVIDIA setup)
+	cfg.NvidiaDriverVersion = c.NvidiaDriverVersion
 
 	// Users
 	for _, u := range c.Users {

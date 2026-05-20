@@ -6,10 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/castrojo/knuckle/internal/model"
 	"github.com/castrojo/knuckle/internal/runner"
 )
+
+// pciDevicesPath is the root of the PCI sysfs device tree.
+// Override in tests to use a temporary directory.
+var pciDevicesPath = "/sys/bus/pci/devices"
 
 // Prober is the interface for system hardware discovery
 type Prober interface {
@@ -229,4 +234,54 @@ func resolveByIDPath(devPath string) string {
 		}
 	}
 	return devPath
+}
+
+// NvidiaGPUInfo represents a detected NVIDIA GPU found via the PCI sysfs tree.
+type NvidiaGPUInfo struct {
+	PCIAddress string // e.g. "0000:01:00.0"
+	PCIClass   string // e.g. "0x030200" (3D controller)
+}
+
+// DetectNvidiaGPUs scans the PCI device tree for NVIDIA display/compute controllers.
+// No NVIDIA driver needs to be loaded — reads /sys/bus/pci/devices/ directly.
+// The installer runs on the target machine, so any GPU detected here will also be
+// present on the installed system, making this safe for sysext auto-selection.
+// Returns an empty slice when no NVIDIA GPUs are found or /sys is unavailable.
+func DetectNvidiaGPUs() []NvidiaGPUInfo {
+	return detectNvidiaGPUsFromPath(pciDevicesPath)
+}
+
+func detectNvidiaGPUsFromPath(devPath string) []NvidiaGPUInfo {
+	const nvidiaVendorID = "0x10de"
+
+	vendorPaths, err := filepath.Glob(filepath.Join(devPath, "*", "vendor"))
+	if err != nil || len(vendorPaths) == 0 {
+		return nil
+	}
+
+	var gpus []NvidiaGPUInfo
+	for _, vendorFile := range vendorPaths {
+		data, err := os.ReadFile(vendorFile)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(data)) != nvidiaVendorID {
+			continue
+		}
+		dir := filepath.Dir(vendorFile)
+		classData, err := os.ReadFile(filepath.Join(dir, "class"))
+		if err != nil {
+			continue
+		}
+		class := strings.TrimSpace(string(classData))
+		// Display and compute controllers occupy the 0x03xxxx PCI class range:
+		// 0x030000 = VGA compatible, 0x030200 = 3D controller, etc.
+		if strings.HasPrefix(class, "0x03") {
+			gpus = append(gpus, NvidiaGPUInfo{
+				PCIAddress: filepath.Base(dir),
+				PCIClass:   class,
+			})
+		}
+	}
+	return gpus
 }

@@ -103,10 +103,6 @@ func TestNvidiaRuntimeCaveatsArePrecise(t *testing.T) {
 		t.Fatalf("nvidia-runtime should have at least 3 caveats (kernel, CUDA, arch), got %d", len(caveats))
 	}
 	// Verify the three critical facts are present somewhere in the caveats.
-	all := ""
-	for _, c := range caveats {
-		all += c + " "
-	}
 	checks := []struct {
 		keyword string
 		desc    string

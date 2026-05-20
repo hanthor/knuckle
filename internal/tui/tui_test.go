@@ -408,3 +408,114 @@ func TestViewSysextCursorIndexSafety(t *testing.T) {
 		t.Error("Sysexts[1] should remain unselected")
 	}
 }
+
+func TestNvidiaAutoSelectShownInView(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.NvidiaGPUDetected = true
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "nvidia-runtime", Version: "1.17.9", Category: "GPU / Accelerators",
+			SupportTier: "Bakery Maintained", Selected: true},
+	}
+	w.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+	m := New(w)
+	m.width = 120
+	view := m.View()
+
+	if !strings.Contains(view, "NVIDIA GPU detected") {
+		t.Error("sysext view should show GPU auto-detect notice when NvidiaGPUDetected=true")
+	}
+}
+
+func TestNvidiaDriverVersionCycleForward(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "nvidia-runtime", Version: "1.17.9", Selected: true},
+	}
+	w.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+	m := New(w)
+	m.cursor = 0
+
+	// Cycle forward one step.
+	m.cycleNvidiaDriverVersion(1)
+	if m.Wizard.State.Config.NvidiaDriverVersion == model.DefaultNvidiaDriverSeries {
+		t.Error("driver version should have changed after cycling forward")
+	}
+	if m.Wizard.State.Config.NvidiaDriverVersion == "" {
+		t.Error("driver version must not be empty after cycling")
+	}
+}
+
+func TestNvidiaDriverVersionCycleWraps(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "nvidia-runtime", Version: "1.17.9", Selected: true},
+	}
+	// Start at the last option — cycling forward should wrap to first.
+	lastOpt := model.NvidiaDriverOptions[len(model.NvidiaDriverOptions)-1]
+	w.State.Config.NvidiaDriverVersion = lastOpt.ID
+	m := New(w)
+	m.cursor = 0
+
+	m.cycleNvidiaDriverVersion(1)
+	if m.Wizard.State.Config.NvidiaDriverVersion != model.NvidiaDriverOptions[0].ID {
+		t.Errorf("expected wrap-around to %q, got %q",
+			model.NvidiaDriverOptions[0].ID, m.Wizard.State.Config.NvidiaDriverVersion)
+	}
+}
+
+func TestNvidiaDriverVersionSetOnToggle(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "nvidia-runtime", Version: "1.17.9", Category: "GPU / Accelerators",
+			SupportTier: "Bakery Maintained", Selected: false},
+	}
+	m := New(w)
+	m.cursor = 0
+
+	// Space to select nvidia-runtime — driver version should be set to default.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	if !w.State.Sysexts[0].Selected {
+		t.Error("nvidia-runtime should be selected after space")
+	}
+	if w.State.Config.NvidiaDriverVersion == "" {
+		t.Errorf("NvidiaDriverVersion should be set to default when nvidia-runtime is selected, got empty")
+	}
+
+	// Space again to deselect — driver version should be cleared.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	if w.State.Sysexts[0].Selected {
+		t.Error("nvidia-runtime should be deselected after second space")
+	}
+	if w.State.Config.NvidiaDriverVersion != "" {
+		t.Errorf("NvidiaDriverVersion should be cleared when nvidia-runtime is deselected, got %q",
+			w.State.Config.NvidiaDriverVersion)
+	}
+}
+
+func TestNvidiaDriverVersionInDetailPanel(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "nvidia-runtime", Version: "1.17.9", Category: "GPU / Accelerators",
+			SupportTier: "Bakery Maintained", Selected: true},
+	}
+	w.State.Config.NvidiaDriverVersion = "570-open"
+	m := New(w)
+	m.cursor = 0
+	m.width = 120
+
+	view := m.View()
+	if !strings.Contains(view, "KERNEL DRIVER SERIES") {
+		t.Error("detail panel should show KERNEL DRIVER SERIES section for nvidia-runtime when selected")
+	}
+	if !strings.Contains(view, "570") {
+		t.Error("detail panel should show the current driver series (570)")
+	}
+	if !strings.Contains(view, "[ / ]") || !strings.Contains(view, "change") {
+		t.Error("detail panel should show [ / ] key hint for changing driver version")
+	}
+}
