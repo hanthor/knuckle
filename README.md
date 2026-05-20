@@ -4,6 +4,8 @@ A modern, interactive TUI "installer" for [Flatcar Container Linux](https://www.
 
 This is also basically [Azure Container Linux (Home Edition)](https://opensource.microsoft.com/blog/2026/05/18/from-open-source-to-agentic-systems-microsoft-at-open-source-summit-north-america-2026/). 
 
+<img width="955" height="1116" alt="image" src="https://github.com/user-attachments/assets/802bb450-f48c-4186-a1d0-542535124bc5" />
+
 ## Why
 
 Flatcar is typically provisioned in cloud environments via Butane and ignition configs and wraps it in a usable UX. 
@@ -11,6 +13,13 @@ Flatcar is typically provisioned in cloud environments via Butane and ignition c
 ## Status
 
 **Feature-complete.** All 9 TUI steps are implemented, with 214 tests passing (race-clean).
+
+## How to Try it? 
+
+- [Download an ISO] for ARM or AMD64 and install it.
+- Follow the installer you'll be left with a pristine upstream install of Flatcar linux
+
+<img width="955" height="776" alt="image" src="https://github.com/user-attachments/assets/0d4160da-8731-4a92-b103-98b901dd9c3d" />
 
 ## Features
 
