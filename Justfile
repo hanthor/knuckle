@@ -124,7 +124,7 @@ vm *FLAGS='--dry-run':
     just _kill-vm
 
     rm -f .vm/boot.qcow2 .vm/target.qcow2
-    qemu-img create -f qcow2 -b .vm/flatcar_base.img -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base.img" -F qcow2 .vm/boot.qcow2 >/dev/null
     qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
     just _write-ignition
 
@@ -154,7 +154,7 @@ vm-ssh *FLAGS='--dry-run':
     just _kill-vm
 
     rm -f .vm/boot.qcow2 .vm/target.qcow2
-    qemu-img create -f qcow2 -b .vm/flatcar_base.img -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base.img" -F qcow2 .vm/boot.qcow2 >/dev/null
     qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
     just _write-ignition
 
@@ -207,7 +207,7 @@ vm-e2e:
 
     # Installer VM disk (CoW overlay) + blank target disk
     rm -f .vm/boot.qcow2 .vm/target.qcow2
-    qemu-img create -f qcow2 -b .vm/flatcar_base.img -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base.img" -F qcow2 .vm/boot.qcow2 >/dev/null
     qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
 
     # Ignition for the installer VM: e2e key on core, sshd enabled
