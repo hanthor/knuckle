@@ -612,3 +612,79 @@ func TestResolveSysexts_Empty(t *testing.T) {
 		t.Error("bakery client should not be called when sysexts list is empty")
 	}
 }
+
+func TestValidate_InvalidArch(t *testing.T) {
+	cfg := Config{
+		Arch:           "riscv64",
+		Channel:        "stable",
+		Hostname:       "node",
+		Network:        NetworkConfig{Mode: "dhcp"},
+		Users:          []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA test"}}},
+		Disk:           "/dev/vda",
+		UpdateStrategy: "reboot",
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid arch")
+	}
+	if !strings.Contains(err.Error(), "arch") {
+		t.Errorf("error should mention arch, got: %v", err)
+	}
+}
+
+func TestValidate_Arm64LTSRejected(t *testing.T) {
+	cfg := Config{
+		Arch:           "arm64",
+		Channel:        "lts",
+		Hostname:       "node",
+		Network:        NetworkConfig{Mode: "dhcp"},
+		Users:          []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA test"}}},
+		Disk:           "/dev/vda",
+		UpdateStrategy: "reboot",
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for arm64+lts")
+	}
+	if !strings.Contains(err.Error(), "LTS") {
+		t.Errorf("error should mention LTS, got: %v", err)
+	}
+}
+
+func TestToInstallConfig_DefaultArch(t *testing.T) {
+	cfg := Config{
+		// Arch omitted — should default to amd64
+		Channel:        "stable",
+		Hostname:       "node",
+		Network:        NetworkConfig{Mode: "dhcp"},
+		Users:          []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA test"}}},
+		Disk:           "/dev/vda",
+		UpdateStrategy: "reboot",
+	}
+	ic, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ic.Arch != "amd64" {
+		t.Errorf("default arch: got %q, want \"amd64\"", ic.Arch)
+	}
+}
+
+func TestToInstallConfig_Arm64(t *testing.T) {
+	cfg := Config{
+		Arch:           "arm64",
+		Channel:        "stable",
+		Hostname:       "node",
+		Network:        NetworkConfig{Mode: "dhcp"},
+		Users:          []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA test"}}},
+		Disk:           "/dev/vda",
+		UpdateStrategy: "reboot",
+	}
+	ic, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ic.Arch != "arm64" {
+		t.Errorf("got arch %q, want \"arm64\"", ic.Arch)
+	}
+}

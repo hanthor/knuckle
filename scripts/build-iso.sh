@@ -9,23 +9,34 @@
 #   Ubuntu:  sudo apt-get install -y xorriso mtools cpio systemd-boot-efi
 #   Fedora:  sudo dnf install -y xorriso mtools cpio systemd-boot-unsigned
 #
-# Usage: ./scripts/build-iso.sh [--channel stable|beta|alpha|lts] [--binary /path/to/knuckle]
+# Usage: ./scripts/build-iso.sh [--channel stable|beta|alpha|lts] [--arch amd64|arm64] [--binary /path/to/knuckle]
 set -euo pipefail
 
 # ── Argument parsing ─────────────────────────────────────────────────────────
 CHANNEL="stable"
+ARCH="amd64"
 BINARY_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --channel=*) CHANNEL="${1#--channel=}"; shift ;;
         --channel)   CHANNEL="$2"; shift 2 ;;
+        --arch=*)    ARCH="${1#--arch=}"; shift ;;
+        --arch)      ARCH="$2"; shift 2 ;;
         --binary=*)  BINARY_OVERRIDE="${1#--binary=}"; shift ;;
         --binary)    BINARY_OVERRIDE="$2"; shift 2 ;;
         stable|beta|alpha|lts) CHANNEL="$1"; shift ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
+
+# ── Validate arch + channel combination ─────────────────────────────────────
+if [[ "$ARCH" != "amd64" && "$ARCH" != "arm64" ]]; then
+    echo "error: --arch must be amd64 or arm64 (got '$ARCH')" >&2; exit 1
+fi
+if [[ "$ARCH" == "arm64" && "$CHANNEL" == "lts" ]]; then
+    echo "error: LTS channel is not available for arm64" >&2; exit 1
+fi
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -42,10 +53,12 @@ elif [[ -f "$ROOT_DIR/knuckle" ]]; then
     BINARY="$ROOT_DIR/knuckle"
 fi
 
+# Flatcar release server arch directory: "amd64-usr" or "arm64-usr"
+ARCH_DIR="${ARCH}-usr"
 if [[ "$CHANNEL" == "lts" ]]; then
-    BASE_URL="https://lts.release.flatcar-linux.net/amd64-usr/current"
+    BASE_URL="https://lts.release.flatcar-linux.net/${ARCH_DIR}/current"
 else
-    BASE_URL="https://${CHANNEL}.release.flatcar-linux.net/amd64-usr/current"
+    BASE_URL="https://${CHANNEL}.release.flatcar-linux.net/${ARCH_DIR}/current"
 fi
 
 # ── Dependency check ─────────────────────────────────────────────────────────
@@ -57,32 +70,38 @@ for cmd in xorriso mformat mcopy mmd cpio gzip; do
     fi
 done
 
-# Locate systemd-boot EFI binary (UEFI-only; no GRUB)
+# Locate systemd-boot EFI binary — arch-specific file name
+# amd64: systemd-bootx64.efi  →  EFI/BOOT/BOOTX64.EFI  (UEFI spec)
+# arm64: systemd-bootaa64.efi →  EFI/BOOT/BOOTAA64.EFI (UEFI spec)
+if [[ "$ARCH" == "arm64" ]]; then
+    SDBOOT_FILENAME="systemd-bootaa64.efi"
+    EFI_BOOT_NAME="BOOTAA64.EFI"
+else
+    SDBOOT_FILENAME="systemd-bootx64.efi"
+    EFI_BOOT_NAME="BOOTX64.EFI"
+fi
 SDBOOT_EFI=""
-for candidate in \
-    /usr/lib/systemd/boot/efi/systemd-bootx64.efi \
-    /lib/systemd/boot/efi/systemd-bootx64.efi \
-    /usr/share/systemd/boot/efi/systemd-bootx64.efi; do
+for candidate in     "/usr/lib/systemd/boot/efi/${SDBOOT_FILENAME}"     "/lib/systemd/boot/efi/${SDBOOT_FILENAME}"     "/usr/share/systemd/boot/efi/${SDBOOT_FILENAME}"; do
     if [[ -f "$candidate" ]]; then
         SDBOOT_EFI="$candidate"
         break
     fi
 done
 if [[ -z "$SDBOOT_EFI" ]]; then
-    echo "Missing: systemd-bootx64.efi" >&2
+    echo "Missing: ${SDBOOT_FILENAME}" >&2
     echo "  Ubuntu: sudo apt-get install -y systemd-boot-efi" >&2
     echo "  Fedora: sudo dnf install -y systemd-boot-unsigned" >&2
     exit 1
 fi
 
-echo "=== Building knuckle installer ISO (channel: $CHANNEL) ==="
+echo "=== Building knuckle installer ISO (channel: $CHANNEL, arch: $ARCH) ==="
 echo "  systemd-boot: $SDBOOT_EFI"
 
 # ── 1. Build knuckle binary (skipped when binary already present) ─────────────
 if [[ ! -f "$BINARY" ]]; then
     echo "[1/5] Building knuckle..."
     VERSION="$(git -C "$ROOT_DIR" describe --tags --always 2>/dev/null || echo dev)"
-    (cd "$ROOT_DIR" && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+    (cd "$ROOT_DIR" && GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 \
         go build -ldflags="-s -w -X main.version=${VERSION}" -o bin/knuckle ./cmd/knuckle)
     BINARY="$ROOT_DIR/bin/knuckle"
 else
@@ -213,7 +232,7 @@ mformat -i "$EFI_IMG" -F ::
 
 # Boot loader
 mmd -i "$EFI_IMG" ::/EFI ::/EFI/BOOT
-mcopy -i "$EFI_IMG" "$SDBOOT_EFI" ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i "$EFI_IMG" "$SDBOOT_EFI" "::/EFI/BOOT/${EFI_BOOT_NAME}"
 
 # systemd-boot configuration (BLS)
 mmd -i "$EFI_IMG" ::/loader ::/loader/entries
@@ -241,7 +260,7 @@ echo "[5/5] Assembling ISO..."
 cp "$EFI_IMG" "$ISO_DIR/efi.img"
 
 mkdir -p "$OUTPUT_DIR"
-ISO_OUT="$OUTPUT_DIR/knuckle-installer-${CHANNEL}.iso"
+ISO_OUT="$OUTPUT_DIR/knuckle-installer-${CHANNEL}-${ARCH}.iso"
 
 xorriso -as mkisofs \
     -o "$ISO_OUT" \
@@ -256,13 +275,23 @@ xorriso -as mkisofs \
 echo ""
 echo "ISO built: $ISO_OUT ($(du -h "$ISO_OUT" | cut -f1))"
 echo ""
-echo "Test with QEMU (UEFI):"
-echo "  OVMF=/usr/share/OVMF/OVMF_CODE.fd"
-echo "  qemu-system-x86_64 -m 4096 -enable-kvm \\"
-echo "    -drive if=pflash,format=raw,readonly=on,file=\$OVMF \\"
-echo "    -cdrom $ISO_OUT \\"
-echo "    -drive if=virtio,file=target.qcow2,format=qcow2 \\"
-echo "    -nographic"
+if [[ "$ARCH" == "arm64" ]]; then
+    echo "Test with QEMU (UEFI, arm64):"
+    echo "  OVMF=/usr/share/AAVMF/AAVMF_CODE.fd"
+    echo "  qemu-system-aarch64 -m 4096 -cpu cortex-a57 -M virt \\"
+    echo "    -drive if=pflash,format=raw,readonly=on,file=\$OVMF \\"
+    echo "    -cdrom $ISO_OUT \\"
+    echo "    -drive if=virtio,file=target.qcow2,format=qcow2 \\"
+    echo "    -nographic"
+else
+    echo "Test with QEMU (UEFI, amd64):"
+    echo "  OVMF=/usr/share/OVMF/OVMF_CODE.fd"
+    echo "  qemu-system-x86_64 -m 4096 -enable-kvm \\"
+    echo "    -drive if=pflash,format=raw,readonly=on,file=\$OVMF \\"
+    echo "    -cdrom $ISO_OUT \\"
+    echo "    -drive if=virtio,file=target.qcow2,format=qcow2 \\"
+    echo "    -nographic"
+fi
 echo ""
 echo "Write to USB:"
 echo "  sudo dd if=$ISO_OUT of=/dev/sdX bs=4M status=progress"

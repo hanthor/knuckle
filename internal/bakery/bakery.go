@@ -22,6 +22,9 @@ const (
 // Client is the interface for fetching the sysext catalog
 type Client interface {
 	FetchCatalog(ctx context.Context) ([]model.SysextEntry, error)
+	// FetchCatalogArch fetches the catalog and selects assets for the given arch.
+	// arch must be "amd64" or "arm64". Falls back to x86-64 assets for amd64.
+	FetchCatalogArch(ctx context.Context, arch string) ([]model.SysextEntry, error)
 }
 
 // HTTPClient fetches the catalog from the GitHub Releases API
@@ -61,6 +64,22 @@ type githubRelease struct {
 }
 
 func (c *HTTPClient) FetchCatalog(ctx context.Context) ([]model.SysextEntry, error) {
+	return c.FetchCatalogArch(ctx, "amd64")
+}
+
+// FetchCatalogArch fetches the catalog and selects assets for the given arch.
+// Flatcar Bakery asset naming: "<name>-<ver>-x86-64.raw" (amd64) and "<name>-<ver>-arm64.raw" (arm64).
+func (c *HTTPClient) FetchCatalogArch(ctx context.Context, arch string) ([]model.SysextEntry, error) {
+	// Map Go arch name to the suffix used in Flatcar Bakery asset filenames.
+	var assetSuffix string
+	switch arch {
+	case "amd64":
+		assetSuffix = "x86-64"
+	case "arm64":
+		assetSuffix = "arm64"
+	default:
+		return nil, fmt.Errorf("unsupported architecture %q: must be amd64 or arm64", arch)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.CatalogURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
@@ -108,10 +127,10 @@ func (c *HTTPClient) FetchCatalog(ctx context.Context) ([]model.SysextEntry, err
 			continue
 		}
 
-		// Find the x86-64.raw asset
+		// Find the asset matching the requested arch suffix
 		var downloadURL string
 		for _, asset := range rel.Assets {
-			if strings.Contains(asset.Name, "x86-64") && strings.HasSuffix(asset.Name, ".raw") {
+			if strings.Contains(asset.Name, assetSuffix) && strings.HasSuffix(asset.Name, ".raw") {
 				downloadURL = asset.BrowserDownloadURL
 				break
 			}
@@ -175,5 +194,9 @@ type MockClient struct {
 }
 
 func (m *MockClient) FetchCatalog(ctx context.Context) ([]model.SysextEntry, error) {
+	return m.Entries, m.Err
+}
+
+func (m *MockClient) FetchCatalogArch(ctx context.Context, arch string) ([]model.SysextEntry, error) {
 	return m.Entries, m.Err
 }

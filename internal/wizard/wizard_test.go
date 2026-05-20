@@ -34,6 +34,10 @@ func (m *mockBakery) FetchCatalog(ctx context.Context) ([]model.SysextEntry, err
 	return m.sysexts, m.err
 }
 
+func (m *mockBakery) FetchCatalogArch(ctx context.Context, arch string) ([]model.SysextEntry, error) {
+	return m.sysexts, m.err
+}
+
 type mockInstaller struct {
 	called bool
 	cfg    *model.InstallConfig

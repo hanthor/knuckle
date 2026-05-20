@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -299,5 +300,64 @@ func TestVerificationStatusInChannelInfo(t *testing.T) {
 	// The signature will verify successfully (it's a real Flatcar signature).
 	if !info.SignedDigest {
 		t.Error("SignedDigest should be true — signature should verify with ProtonMail/go-crypto")
+	}
+}
+
+func TestFetchChannelInfoArch_InvalidArch(t *testing.T) {
+	_, err := FetchChannelInfoArch(context.Background(), "stable", "riscv64")
+	if err == nil {
+		t.Fatal("expected error for unsupported arch")
+	}
+	if !strings.Contains(err.Error(), "unsupported architecture") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestFetchChannelInfoArch_LTSArm64(t *testing.T) {
+	_, err := FetchChannelInfoArch(context.Background(), "lts", "arm64")
+	if err == nil {
+		t.Fatal("expected error for lts+arm64")
+	}
+	if !strings.Contains(err.Error(), "LTS channel is not available for arm64") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestFetchAllChannelsArch_Arm64_ExcludesLTS(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/version.txt", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(mockVersionTxt))
+	})
+	mux.HandleFunc("/packages.txt", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(mockPackageList))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// Intercept fetchAllChannelsWithURLFn by using a test-local urlFn.
+	// We call FetchAllChannelsArch indirectly via fetchAllChannelsWithURLFn
+	// to keep test coverage without requiring real network access.
+	results, err := fetchAllChannelsWithURLFn(context.Background(), func(channel string) (string, string) {
+		return srv.URL + "/version.txt", srv.URL + "/packages.txt"
+	}, "stable", "beta", "alpha") // arm64 channel list (no lts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(results) != 3 {
+		t.Fatalf("arm64 should have 3 channels (stable/beta/alpha), got %d", len(results))
+	}
+	expected := []string{"stable", "beta", "alpha"}
+	for i, ch := range expected {
+		if results[i].Channel != ch {
+			t.Errorf("results[%d].Channel: got %q, want %q", i, results[i].Channel, ch)
+		}
+	}
+}
+
+func TestFetchAllChannelsArch_InvalidArch(t *testing.T) {
+	_, err := FetchAllChannelsArch(context.Background(), "ppc64")
+	if err == nil {
+		t.Fatal("expected error for unsupported arch")
 	}
 }

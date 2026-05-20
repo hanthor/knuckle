@@ -1,7 +1,16 @@
 # Knuckle — Flatcar Container Linux TUI Installer
 # https://github.com/castrojo/knuckle
 
-QEMU := if path_exists("/home/linuxbrew/.linuxbrew/bin/qemu-system-x86_64") == "true" { "/home/linuxbrew/.linuxbrew/bin/qemu-system-x86_64" } else { "qemu-system-x86_64" }
+# Target architecture for build/ISO/VM recipes. Override with: KNUCKLE_ARCH=arm64 just <recipe>
+KNUCKLE_ARCH := env_var_or_default("KNUCKLE_ARCH", "amd64")
+
+QEMU := if env_var_or_default("KNUCKLE_ARCH", "amd64") == "arm64" { \
+    "qemu-system-aarch64" \
+} else if path_exists("/home/linuxbrew/.linuxbrew/bin/qemu-system-x86_64") == "true" { \
+    "/home/linuxbrew/.linuxbrew/bin/qemu-system-x86_64" \
+} else { \
+    "qemu-system-x86_64" \
+}
 SSH_OPTS := "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 
 default:
@@ -11,14 +20,26 @@ default:
     @echo "  just vm        — install in a VM, boots into installed system after"
     @echo "  just vm-e2e    — automated: headless install → boot → verify SSH"
     @echo "  just e2e       — full end-to-end: build ISO → boot → install → verify"
+    @echo ""
+    @echo "ARM64 (requires arm64 hardware or QEMU TCG):"
+    @echo "  KNUCKLE_ARCH=arm64 just build"
+    @echo "  KNUCKLE_ARCH=arm64 just boot-iso"
 
-# Build the binary
+# Build the binary (amd64 by default; set KNUCKLE_ARCH=arm64 for arm64)
 build:
     #!/usr/bin/env bash
     VERSION=$(git describe --tags --always 2>/dev/null || echo dev)
-    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+    GOOS=linux GOARCH={{KNUCKLE_ARCH}} CGO_ENABLED=0 go build \
         -ldflags="-s -w -X main.version=${VERSION}" \
         -o bin/knuckle ./cmd/knuckle
+
+# Cross-compile for arm64 (does not run — verifies the code compiles)
+build-arm64:
+    #!/usr/bin/env bash
+    VERSION=$(git describe --tags --always 2>/dev/null || echo dev)
+    GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build \
+        -ldflags="-s -w -X main.version=${VERSION}" \
+        -o bin/knuckle-arm64 ./cmd/knuckle
 
 # Run tests
 test:
@@ -535,16 +556,24 @@ e2e:
     qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
 
     OVMF=""
-    for candidate in \
-        /usr/share/OVMF/OVMF_CODE.fd \
-        /usr/share/edk2/ovmf/OVMF_CODE.fd \
-        /home/linuxbrew/.linuxbrew/Cellar/qemu/*/share/qemu/edk2-x86_64-code.fd; do
-        # shellcheck disable=SC2086
-        for f in $candidate; do
-            [ -f "$f" ] && OVMF="$f" && break 2
+    if [[ "{{KNUCKLE_ARCH}}" == "arm64" ]]; then
+        OVMF_CANDIDATES=(
+            /usr/share/AAVMF/AAVMF_CODE.fd
+            /usr/share/qemu-efi-aarch64/QEMU_EFI.fd
+        )
+    else
+        OVMF_CANDIDATES=(
+            /usr/share/OVMF/OVMF_CODE.fd
+            /usr/share/edk2/ovmf/OVMF_CODE.fd
+        )
+        for f in /home/linuxbrew/.linuxbrew/Cellar/qemu/*/share/qemu/edk2-x86_64-code.fd; do
+            OVMF_CANDIDATES+=("$f")
         done
+    fi
+    for candidate in "${OVMF_CANDIDATES[@]}"; do
+        [ -f "$candidate" ] && OVMF="$candidate" && break
     done
-    [ -n "$OVMF" ] || { echo "OVMF not found — install ovmf package"; exit 1; }
+    [ -n "$OVMF" ] || { echo "OVMF not found — install ovmf (amd64) or qemu-efi-aarch64 (arm64)"; exit 1; }
 
     echo "Launching installer VM (UEFI, systemd-boot)..."
     echo "  → GTK window shows VGA (tty1) — knuckle TUI appears here"
@@ -565,30 +594,40 @@ e2e:
         -display gtk
 
 # Build installer ISO (requires xorriso, mtools, cpio, systemd-boot-efi)
+# KNUCKLE_ARCH=arm64 just iso  — builds arm64 ISO
 iso *CHANNEL='stable':
-    ./scripts/build-iso.sh {{CHANNEL}}
+    ./scripts/build-iso.sh --channel {{CHANNEL}} --arch {{KNUCKLE_ARCH}}
 
 # Boot ISO in QEMU with UEFI (Ctrl-a x to quit)
+# KNUCKLE_ARCH=arm64 just boot-iso  — boots arm64 ISO (requires qemu-system-aarch64)
 boot-iso:
     #!/usr/bin/env bash
     set -euo pipefail
-    ISO="output/knuckle-installer-stable.iso"
+    ISO="output/knuckle-installer-stable-{{KNUCKLE_ARCH}}.iso"
     [ -f "$ISO" ] || { echo "No ISO. Run: just iso"; exit 1; }
     just _kill-vm
     mkdir -p .vm
     [ -f .vm/target.qcow2 ] || qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
     OVMF=""
-    for candidate in \
-        /usr/share/OVMF/OVMF_CODE.fd \
-        /usr/share/edk2/ovmf/OVMF_CODE.fd \
-        /home/linuxbrew/.linuxbrew/Cellar/qemu/*/share/qemu/edk2-x86_64-code.fd; do
-        # shellcheck disable=SC2086
-        for f in $candidate; do
-            [ -f "$f" ] && OVMF="$f" && break 2
+    if [[ "{{KNUCKLE_ARCH}}" == "arm64" ]]; then
+        OVMF_CANDIDATES=(
+            /usr/share/AAVMF/AAVMF_CODE.fd
+            /usr/share/qemu-efi-aarch64/QEMU_EFI.fd
+        )
+    else
+        OVMF_CANDIDATES=(
+            /usr/share/OVMF/OVMF_CODE.fd
+            /usr/share/edk2/ovmf/OVMF_CODE.fd
+        )
+        for f in /home/linuxbrew/.linuxbrew/Cellar/qemu/*/share/qemu/edk2-x86_64-code.fd; do
+            OVMF_CANDIDATES+=("$f")
         done
+    fi
+    for candidate in "${OVMF_CANDIDATES[@]}"; do
+        [ -f "$candidate" ] && OVMF="$candidate" && break
     done
-    [ -n "$OVMF" ] || { echo "OVMF not found — install ovmf package"; exit 1; }
-    echo "Booting ISO (UEFI, systemd-boot)..."
+    [ -n "$OVMF" ] || { echo "OVMF not found — install ovmf (amd64) or qemu-efi-aarch64 (arm64)"; exit 1; }
+    echo "Booting ISO (UEFI, systemd-boot, arch={{KNUCKLE_ARCH}})..."
     echo "  → GTK window shows VGA console (tty1) where knuckle TUI runs"
     echo ""
     {{QEMU}} \
@@ -603,22 +642,30 @@ boot-iso:
 boot-iso-ssh:
     #!/usr/bin/env bash
     set -euo pipefail
-    ISO="output/knuckle-installer-stable.iso"
+    ISO="output/knuckle-installer-stable-{{KNUCKLE_ARCH}}.iso"
     [ -f "$ISO" ] || { echo "No ISO. Run: just iso"; exit 1; }
     just _kill-vm
     mkdir -p .vm
     [ -f .vm/target.qcow2 ] || qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
     OVMF=""
-    for candidate in \
-        /usr/share/OVMF/OVMF_CODE.fd \
-        /usr/share/edk2/ovmf/OVMF_CODE.fd \
-        /home/linuxbrew/.linuxbrew/Cellar/qemu/*/share/qemu/edk2-x86_64-code.fd; do
-        # shellcheck disable=SC2086
-        for f in $candidate; do
-            [ -f "$f" ] && OVMF="$f" && break 2
+    if [[ "{{KNUCKLE_ARCH}}" == "arm64" ]]; then
+        OVMF_CANDIDATES=(
+            /usr/share/AAVMF/AAVMF_CODE.fd
+            /usr/share/qemu-efi-aarch64/QEMU_EFI.fd
+        )
+    else
+        OVMF_CANDIDATES=(
+            /usr/share/OVMF/OVMF_CODE.fd
+            /usr/share/edk2/ovmf/OVMF_CODE.fd
+        )
+        for f in /home/linuxbrew/.linuxbrew/Cellar/qemu/*/share/qemu/edk2-x86_64-code.fd; do
+            OVMF_CANDIDATES+=("$f")
         done
+    fi
+    for candidate in "${OVMF_CANDIDATES[@]}"; do
+        [ -f "$candidate" ] && OVMF="$candidate" && break
     done
-    [ -n "$OVMF" ] || { echo "OVMF not found — install ovmf package"; exit 1; }
+    [ -n "$OVMF" ] || { echo "OVMF not found — install ovmf (amd64) or qemu-efi-aarch64 (arm64)"; exit 1; }
     {{QEMU}} \
         -m 4096 -smp 2 -enable-kvm \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
@@ -672,9 +719,10 @@ _ensure-base:
     #!/usr/bin/env bash
     mkdir -p .vm
     if [ ! -f ".vm/flatcar_base.img" ]; then
-        echo "Downloading Flatcar stable QEMU image (one-time)..."
+        ARCH_DIR="{{KNUCKLE_ARCH}}-usr"
+        echo "Downloading Flatcar stable QEMU image for {{KNUCKLE_ARCH}} (one-time)..."
         curl -L -o .vm/flatcar_base.img.bz2 \
-            "https://stable.release.flatcar-linux.net/amd64-usr/current/flatcar_production_qemu_image.img.bz2"
+            "https://stable.release.flatcar-linux.net/${ARCH_DIR}/current/flatcar_production_qemu_image.img.bz2"
         bunzip2 .vm/flatcar_base.img.bz2
     fi
 

@@ -249,3 +249,46 @@ func TestParseTagName(t *testing.T) {
 		})
 	}
 }
+
+func TestFetchCatalogArch_Arm64(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(mockGitHubReleasesJSON))
+	}))
+	defer srv.Close()
+
+	client := bakery.NewHTTPClientWithURL(srv.URL)
+	entries, err := client.FetchCatalogArch(context.Background(), "arm64")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// docker has an arm64 asset in the fixture — should appear
+	found := false
+	for _, e := range entries {
+		if e.Name == "docker" {
+			found = true
+			if !strings.Contains(e.URL, "arm64") {
+				t.Errorf("docker entry URL should contain arm64, got %q", e.URL)
+			}
+		}
+	}
+	if !found {
+		t.Error("docker should appear in arm64 catalog (has arm64.raw asset)")
+	}
+
+	// tailscale only has x86-64 — should be absent from arm64 catalog
+	for _, e := range entries {
+		if e.Name == "tailscale" {
+			t.Error("tailscale should not appear in arm64 catalog (no arm64.raw asset in fixture)")
+		}
+	}
+}
+
+func TestFetchCatalogArch_InvalidArch(t *testing.T) {
+	client := bakery.NewHTTPClientWithURL("http://unused")
+	_, err := client.FetchCatalogArch(context.Background(), "mips")
+	if err == nil {
+		t.Fatal("expected error for unsupported arch")
+	}
+}

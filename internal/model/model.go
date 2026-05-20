@@ -45,6 +45,7 @@ func (s WizardStep) String() string {
 
 // InstallConfig is the complete installation configuration built by the wizard.
 type InstallConfig struct {
+	Arch           string // amd64 or arm64 (determined at ISO build time; default "amd64")
 	Channel        string // stable, beta, alpha, edge
 	Version        string // optional: pin to specific Flatcar version (flatcar-install -V)
 	Hostname       string

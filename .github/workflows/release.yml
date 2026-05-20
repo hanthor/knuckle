@@ -11,6 +11,9 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
 
@@ -23,12 +26,14 @@ jobs:
 
       - name: Build binary
         run: |
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+          GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 \
             go build -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
-            -o knuckle ./cmd/knuckle
-          sha256sum knuckle > knuckle.sha256
+            -o knuckle-linux-${{ matrix.arch }} ./cmd/knuckle
+          sha256sum knuckle-linux-${{ matrix.arch }} > knuckle-linux-${{ matrix.arch }}.sha256
 
       - name: Install ISO dependencies
+        # LTS is only available for amd64; skip ISO build for arm64+lts (not applicable here
+        # since we build stable, but guard is here for future channel matrix expansion).
         run: |
           sudo apt-get update
           sudo apt-get install -y xorriso mtools cpio systemd-boot-efi
@@ -36,27 +41,29 @@ jobs:
       - name: Build installer ISO
         run: |
           chmod +x ./scripts/build-iso.sh
-          ./scripts/build-iso.sh --channel stable --binary ./knuckle
-          cp output/knuckle-installer-stable.iso .
-          sha256sum knuckle-installer-stable.iso > knuckle-installer-stable.iso.sha256
+          ./scripts/build-iso.sh --channel stable --arch ${{ matrix.arch }} \
+            --binary ./knuckle-linux-${{ matrix.arch }}
+          cp output/knuckle-installer-stable-${{ matrix.arch }}.iso .
+          sha256sum knuckle-installer-stable-${{ matrix.arch }}.iso \
+            > knuckle-installer-stable-${{ matrix.arch }}.iso.sha256
 
       - name: Sign artifacts with cosign (keyless, Sigstore)
         run: |
           cosign sign-blob --yes \
-            --bundle knuckle.bundle \
-            knuckle
+            --bundle knuckle-linux-${{ matrix.arch }}.bundle \
+            knuckle-linux-${{ matrix.arch }}
           cosign sign-blob --yes \
-            --bundle knuckle-installer-stable.iso.bundle \
-            knuckle-installer-stable.iso
+            --bundle knuckle-installer-stable-${{ matrix.arch }}.iso.bundle \
+            knuckle-installer-stable-${{ matrix.arch }}.iso
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          generate_release_notes: ${{ matrix.arch == 'amd64' }}
           files: |
-            knuckle
-            knuckle.sha256
-            knuckle.bundle
-            knuckle-installer-stable.iso
-            knuckle-installer-stable.iso.sha256
-            knuckle-installer-stable.iso.bundle
+            knuckle-linux-${{ matrix.arch }}
+            knuckle-linux-${{ matrix.arch }}.sha256
+            knuckle-linux-${{ matrix.arch }}.bundle
+            knuckle-installer-stable-${{ matrix.arch }}.iso
+            knuckle-installer-stable-${{ matrix.arch }}.iso.sha256
+            knuckle-installer-stable-${{ matrix.arch }}.iso.bundle

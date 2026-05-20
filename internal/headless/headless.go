@@ -20,6 +20,7 @@ import (
 // Config is the JSON schema for headless install configuration.
 // It maps closely to model.InstallConfig but uses simpler types for JSON.
 type Config struct {
+	Arch           string        `json:"arch,omitempty"` // "amd64" or "arm64"; defaults to "amd64"
 	Channel        string        `json:"channel"`
 	Version        string        `json:"version,omitempty"`
 	Hostname       string        `json:"hostname"`
@@ -70,6 +71,7 @@ func LoadConfig(path string) (*Config, error) {
 // ToInstallConfig converts a headless Config to a model.InstallConfig.
 func (c *Config) ToInstallConfig() (*model.InstallConfig, error) {
 	cfg := &model.InstallConfig{
+		Arch:     c.Arch,
 		Channel:  c.Channel,
 		Version:  c.Version,
 		Hostname: c.Hostname,
@@ -78,6 +80,9 @@ func (c *Config) ToInstallConfig() (*model.InstallConfig, error) {
 	}
 
 	// Set defaults
+	if cfg.Arch == "" {
+		cfg.Arch = "amd64"
+	}
 	if cfg.Channel == "" {
 		cfg.Channel = "stable"
 	}
@@ -163,6 +168,14 @@ func resolveSysexts(ctx context.Context, names []string, client bakery.Client) (
 // Validate checks the headless config for errors using the same validation
 // as the TUI wizard path.
 func (c *Config) Validate() error {
+	// Arch
+	if c.Arch != "" && c.Arch != "amd64" && c.Arch != "arm64" {
+		return fmt.Errorf("arch: must be \"amd64\" or \"arm64\" (got %q)", c.Arch)
+	}
+	if c.Arch == "arm64" && c.Channel == "lts" {
+		return fmt.Errorf("arch: LTS channel is not available for arm64")
+	}
+
 	// Channel
 	if c.Channel != "" {
 		if err := validate.Channel(c.Channel); err != nil {

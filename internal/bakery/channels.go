@@ -32,10 +32,24 @@ type ChannelInfo struct {
 }
 
 // FetchChannelInfo fetches version info for a given channel from the Flatcar release server.
+// It targets the amd64 architecture. Use FetchChannelInfoArch for other architectures.
 func FetchChannelInfo(ctx context.Context, channel string) (*ChannelInfo, error) {
-	versionURL := fmt.Sprintf("https://%s.release.flatcar-linux.net/amd64-usr/current/version.txt", channel)
-	pkgURL := fmt.Sprintf("https://%s.release.flatcar-linux.net/amd64-usr/current/flatcar_production_image_packages.txt", channel)
+	return FetchChannelInfoArch(ctx, channel, "amd64")
+}
 
+// FetchChannelInfoArch fetches version info for a given channel and architecture.
+// arch must be "amd64" or "arm64". LTS is only available for amd64.
+func FetchChannelInfoArch(ctx context.Context, channel, arch string) (*ChannelInfo, error) {
+	if arch != "amd64" && arch != "arm64" {
+		return nil, fmt.Errorf("unsupported architecture %q: must be amd64 or arm64", arch)
+	}
+	if channel == "lts" && arch == "arm64" {
+		return nil, fmt.Errorf("LTS channel is not available for arm64")
+	}
+	// Flatcar release server uses "arm64-usr" for ARM64 and "amd64-usr" for x86-64.
+	archDir := arch + "-usr"
+	versionURL := fmt.Sprintf("https://%s.release.flatcar-linux.net/%s/current/version.txt", channel, archDir)
+	pkgURL := fmt.Sprintf("https://%s.release.flatcar-linux.net/%s/current/flatcar_production_image_packages.txt", channel, archDir)
 	return fetchChannelInfoFromURLs(ctx, channel, versionURL, pkgURL)
 }
 
@@ -103,16 +117,33 @@ func fetchChannelInfoFromURLs(ctx context.Context, channel, versionURL, pkgURL s
 	return info, nil
 }
 
-// FetchAllChannels fetches info for stable, beta, alpha in parallel.
+// FetchAllChannels fetches info for stable, beta, alpha, lts in parallel for amd64.
+// Use FetchAllChannelsArch to target a specific architecture.
 func FetchAllChannels(ctx context.Context) ([]ChannelInfo, error) {
-	return fetchAllChannelsWithURLFn(ctx, func(channel string) (string, string) {
-		base := fmt.Sprintf("https://%s.release.flatcar-linux.net/amd64-usr/current", channel)
-		return base + "/version.txt", base + "/flatcar_production_image_packages.txt"
-	})
+	return FetchAllChannelsArch(ctx, "amd64")
 }
 
-func fetchAllChannelsWithURLFn(ctx context.Context, urlFn func(string) (string, string)) ([]ChannelInfo, error) {
-	channels := []string{"stable", "beta", "alpha", "lts"}
+// FetchAllChannelsArch fetches info for all channels available on the given arch.
+// LTS is excluded for arm64 (not published by Flatcar).
+func FetchAllChannelsArch(ctx context.Context, arch string) ([]ChannelInfo, error) {
+	if arch != "amd64" && arch != "arm64" {
+		return nil, fmt.Errorf("unsupported architecture %q: must be amd64 or arm64", arch)
+	}
+	channels := []string{"stable", "beta", "alpha"}
+	if arch == "amd64" {
+		channels = append(channels, "lts")
+	}
+	archDir := arch + "-usr"
+	return fetchAllChannelsWithURLFn(ctx, func(channel string) (string, string) {
+		base := fmt.Sprintf("https://%s.release.flatcar-linux.net/%s/current", channel, archDir)
+		return base + "/version.txt", base + "/flatcar_production_image_packages.txt"
+	}, channels...)
+}
+
+func fetchAllChannelsWithURLFn(ctx context.Context, urlFn func(string) (string, string), channels ...string) ([]ChannelInfo, error) {
+	if len(channels) == 0 {
+		channels = []string{"stable", "beta", "alpha", "lts"}
+	}
 	results := make([]ChannelInfo, len(channels))
 	errs := make([]error, len(channels))
 
