@@ -103,6 +103,10 @@ func buildInstallArgs(cfg *model.InstallConfig, ignitionPath string) []string {
 		"-C", cfg.Channel,
 	}
 
+	// Architecture: flatcar-install auto-detects from the running system's uname -m
+	// (the ISO binary is compiled for the target arch, so uname -m will be correct).
+	// No -B flag is needed; the installer derives the correct image URL automatically.
+
 	if cfg.Version != "" {
 		args = append(args, "-V", cfg.Version)
 	}

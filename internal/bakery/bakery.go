@@ -197,6 +197,26 @@ func (m *MockClient) FetchCatalog(ctx context.Context) ([]model.SysextEntry, err
 	return m.Entries, m.Err
 }
 
+// FetchCatalogArch returns entries whose URL contains the arch-specific suffix,
+// mirroring the filtering that HTTPClient performs. If no entries have
+// arch-specific URLs (e.g. test fixtures with plain URLs), all entries are returned.
 func (m *MockClient) FetchCatalogArch(ctx context.Context, arch string) ([]model.SysextEntry, error) {
-	return m.Entries, m.Err
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	suffix := "x86-64"
+	if arch == "arm64" {
+		suffix = "arm64"
+	}
+	var filtered []model.SysextEntry
+	for _, e := range m.Entries {
+		if strings.Contains(e.URL, suffix) || !strings.Contains(e.URL, "x86-64") && !strings.Contains(e.URL, "arm64") {
+			filtered = append(filtered, e)
+		}
+	}
+	if len(filtered) == 0 && len(m.Entries) > 0 {
+		// No arch-specific URLs at all — return all entries (plain URL test fixtures)
+		return m.Entries, nil
+	}
+	return filtered, nil
 }

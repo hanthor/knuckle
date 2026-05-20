@@ -4,7 +4,7 @@
 # Target architecture for build/ISO/VM recipes. Override with: KNUCKLE_ARCH=arm64 just <recipe>
 KNUCKLE_ARCH := env_var_or_default("KNUCKLE_ARCH", "amd64")
 
-QEMU := if env_var_or_default("KNUCKLE_ARCH", "amd64") == "arm64" { \
+QEMU := if KNUCKLE_ARCH == "arm64" { \
     "qemu-system-aarch64" \
 } else if path_exists("/home/linuxbrew/.linuxbrew/bin/qemu-system-x86_64") == "true" { \
     "/home/linuxbrew/.linuxbrew/bin/qemu-system-x86_64" \
@@ -144,7 +144,7 @@ vm:
     just _kill-vm
 
     rm -f .vm/boot.qcow2 .vm/target.qcow2
-    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base.img" -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base_{{KNUCKLE_ARCH}}.img" -F qcow2 .vm/boot.qcow2 >/dev/null
     qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
     just _write-ignition
 
@@ -222,7 +222,7 @@ vm-e2e:
 
     # Installer VM disk (CoW overlay) + blank target disk
     rm -f .vm/boot.qcow2 .vm/target.qcow2
-    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base.img" -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base_{{KNUCKLE_ARCH}}.img" -F qcow2 .vm/boot.qcow2 >/dev/null
     qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
 
     # Ignition for the installer VM: e2e key on core, sshd enabled
@@ -343,7 +343,7 @@ vm-e2e:
 
     # New installer overlay on same base
     rm -f .vm/boot.qcow2
-    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base.img" -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base_{{KNUCKLE_ARCH}}.img" -F qcow2 .vm/boot.qcow2 >/dev/null
 
     # Detect interface name from the running Flatcar image (virtio-net → ens3 or eth0)
     # Write headless config with static network using QEMU slirp addresses
@@ -432,7 +432,7 @@ vm-e2e:
     rm -f .vm/target-sysext.qcow2
     qemu-img create -f qcow2 .vm/target-sysext.qcow2 20G >/dev/null
     rm -f .vm/boot.qcow2
-    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base.img" -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base_{{KNUCKLE_ARCH}}.img" -F qcow2 .vm/boot.qcow2 >/dev/null
 
     # docker sysext — knuckle resolves the name to a real URL via bakery catalog
     printf '{"channel":"stable","hostname":"e2e-sysext","timezone":"UTC","network":{"mode":"dhcp"},"users":[{"username":"core","ssh_keys":["%s"]}],"disk":"/dev/vdb","sysexts":["docker"],"update_strategy":"off","reboot":false}\n' \
@@ -543,7 +543,7 @@ e2e:
     echo ""
 
     # Build ISO if not present
-    ISO="output/knuckle-installer-stable.iso"
+    ISO="output/knuckle-installer-stable-{{KNUCKLE_ARCH}}.iso"
     if [[ ! -f "$ISO" ]]; then
         echo "Building ISO..."
         just iso stable
@@ -718,12 +718,12 @@ _install-golangci-lint:
 _ensure-base:
     #!/usr/bin/env bash
     mkdir -p .vm
-    if [ ! -f ".vm/flatcar_base.img" ]; then
+    if [ ! -f ".vm/flatcar_base_{{KNUCKLE_ARCH}}.img" ]; then
         ARCH_DIR="{{KNUCKLE_ARCH}}-usr"
         echo "Downloading Flatcar stable QEMU image for {{KNUCKLE_ARCH}} (one-time)..."
-        curl -L -o .vm/flatcar_base.img.bz2 \
+        curl -L -o ".vm/flatcar_base_{{KNUCKLE_ARCH}}.img.bz2" \
             "https://stable.release.flatcar-linux.net/${ARCH_DIR}/current/flatcar_production_qemu_image.img.bz2"
-        bunzip2 .vm/flatcar_base.img.bz2
+        bunzip2 ".vm/flatcar_base_{{KNUCKLE_ARCH}}.img.bz2"
     fi
 
 [private]

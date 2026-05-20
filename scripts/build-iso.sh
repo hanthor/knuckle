@@ -44,8 +44,11 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/.iso-build"
 OUTPUT_DIR="$ROOT_DIR/output"
 
+BINARY=""
 if [[ -n "$BINARY_OVERRIDE" ]]; then
     BINARY="$BINARY_OVERRIDE"
+elif [[ -f "$ROOT_DIR/bin/knuckle-${ARCH}" ]]; then
+    BINARY="$ROOT_DIR/bin/knuckle-${ARCH}"
 elif [[ -f "$ROOT_DIR/bin/knuckle" ]]; then
     BINARY="$ROOT_DIR/bin/knuckle"
 elif [[ -f "$ROOT_DIR/knuckle" ]]; then
@@ -102,8 +105,8 @@ if [[ ! -f "$BINARY" ]]; then
     echo "[1/5] Building knuckle..."
     VERSION="$(git -C "$ROOT_DIR" describe --tags --always 2>/dev/null || echo dev)"
     (cd "$ROOT_DIR" && GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 \
-        go build -ldflags="-s -w -X main.version=${VERSION}" -o bin/knuckle ./cmd/knuckle)
-    BINARY="$ROOT_DIR/bin/knuckle"
+        go build -ldflags="-s -w -X main.version=${VERSION}" -o "bin/knuckle-${ARCH}" ./cmd/knuckle)
+    BINARY="$ROOT_DIR/bin/knuckle-${ARCH}"
 else
     echo "[1/5] Using existing knuckle binary: $BINARY"
 fi

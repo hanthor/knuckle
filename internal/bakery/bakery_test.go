@@ -292,3 +292,62 @@ func TestFetchCatalogArch_InvalidArch(t *testing.T) {
 		t.Fatal("expected error for unsupported arch")
 	}
 }
+
+func TestMockClientFetchCatalogArch(t *testing.T) {
+	entries := []model.SysextEntry{
+		{Name: "docker", URL: "https://example.com/docker-x86-64.raw"},
+		{Name: "containerd", URL: "https://example.com/containerd-arm64.raw"},
+		{Name: "plain", URL: "https://example.com/plain.raw"}, // no arch suffix
+	}
+
+	m := &bakery.MockClient{Entries: entries}
+
+	// amd64: gets x86-64 entries and arch-neutral entries
+	amd64, err := m.FetchCatalogArch(context.Background(), "amd64")
+	if err != nil {
+		t.Fatalf("amd64: unexpected error: %v", err)
+	}
+	names := make(map[string]bool)
+	for _, e := range amd64 {
+		names[e.Name] = true
+	}
+	if !names["docker"] {
+		t.Error("amd64 catalog should contain docker (x86-64 URL)")
+	}
+	if names["containerd"] {
+		t.Error("amd64 catalog should not contain containerd (arm64 URL)")
+	}
+	if !names["plain"] {
+		t.Error("amd64 catalog should contain plain (no arch suffix)")
+	}
+
+	// arm64: gets arm64 entries and arch-neutral entries
+	arm64, err := m.FetchCatalogArch(context.Background(), "arm64")
+	if err != nil {
+		t.Fatalf("arm64: unexpected error: %v", err)
+	}
+	names = make(map[string]bool)
+	for _, e := range arm64 {
+		names[e.Name] = true
+	}
+	if !names["containerd"] {
+		t.Error("arm64 catalog should contain containerd (arm64 URL)")
+	}
+	if names["docker"] {
+		t.Error("arm64 catalog should not contain docker (x86-64 URL)")
+	}
+
+	// error path
+	merr := &bakery.MockClient{Err: errors.New("boom")}
+	_, err = merr.FetchCatalogArch(context.Background(), "amd64")
+	if err == nil {
+		t.Error("expected error from MockClient with Err set")
+	}
+
+	// empty entries — FetchCatalogArch should return nil, nil
+	empty := &bakery.MockClient{}
+	got, err := empty.FetchCatalogArch(context.Background(), "amd64")
+	if err != nil || len(got) != 0 {
+		t.Errorf("empty mock: got %v %v, want nil nil", got, err)
+	}
+}

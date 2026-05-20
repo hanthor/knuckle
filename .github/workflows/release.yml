@@ -14,6 +14,10 @@ jobs:
     strategy:
       matrix:
         arch: [amd64, arm64]
+      # arm64 waits for amd64 to create the release first, avoiding a race
+      # on release creation and ensuring generate_release_notes runs exactly once.
+      max-parallel: 1
+      fail-fast: false
     steps:
       - uses: actions/checkout@v4
 

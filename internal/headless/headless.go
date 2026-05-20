@@ -139,13 +139,13 @@ func (c *Config) ToInstallConfig() (*model.InstallConfig, error) {
 	return cfg, nil
 }
 
-// resolveSysexts fetches the bakery catalog and matches each requested sysext
-// name to its catalog entry. Returns error if any name is not found.
-func resolveSysexts(ctx context.Context, names []string, client bakery.Client) ([]model.SysextEntry, error) {
+// resolveSysexts fetches the bakery catalog for the given arch and matches each
+// requested sysext name to its catalog entry. Returns error if any name is not found.
+func resolveSysexts(ctx context.Context, names []string, client bakery.Client, arch string) ([]model.SysextEntry, error) {
 	if len(names) == 0 {
 		return nil, nil
 	}
-	catalog, err := client.FetchCatalog(ctx)
+	catalog, err := client.FetchCatalogArch(ctx, arch)
 	if err != nil {
 		return nil, fmt.Errorf("fetching sysext catalog: %w", err)
 	}
@@ -313,8 +313,12 @@ func Run(ctx context.Context, cfg *Config, installer install.Installer, logger *
 	var resolvedSysexts []model.SysextEntry
 	if len(cfg.Sysexts) > 0 {
 		fmt.Printf("→ Resolving %d sysext(s) from catalog...\n", len(cfg.Sysexts))
+		sysextArch := cfg.Arch
+		if sysextArch == "" {
+			sysextArch = "amd64"
+		}
 		var serr error
-		resolvedSysexts, serr = resolveSysexts(ctx, cfg.Sysexts, newBakeryClientFunc())
+		resolvedSysexts, serr = resolveSysexts(ctx, cfg.Sysexts, newBakeryClientFunc(), sysextArch)
 		if serr != nil {
 			return fmt.Errorf("resolving sysexts: %w", serr)
 		}

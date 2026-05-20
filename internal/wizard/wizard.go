@@ -5,6 +5,7 @@ package wizard
 import (
 	"context"
 	"fmt"
+	"runtime"
 
 	"github.com/castrojo/knuckle/internal/bakery"
 	"github.com/castrojo/knuckle/internal/ignition"
@@ -61,6 +62,9 @@ func New(prober probe.Prober, bakeryClient bakery.Client, installer install.Inst
 		State: &State{
 			CurrentStep: model.StepWelcome,
 			Config: model.InstallConfig{
+				// Arch is set at compile time — the ISO is built for a specific architecture.
+				// runtime.GOARCH reflects the arch the binary was compiled for (amd64 or arm64).
+				Arch:           runtime.GOARCH,
 				Channel:        "stable",
 				UpdateStrategy: model.UpdateStrategy{RebootStrategy: "reboot"},
 			},
@@ -270,9 +274,9 @@ func (w *Wizard) runSystemChecks() {
 	}
 }
 
-// FetchSysexts loads the sysext catalog
+// FetchSysexts loads the sysext catalog for the configured architecture.
 func (w *Wizard) FetchSysexts(ctx context.Context) error {
-	sysexts, err := w.Bakery.FetchCatalog(ctx)
+	sysexts, err := w.Bakery.FetchCatalogArch(ctx, w.State.Config.Arch)
 	if err != nil {
 		return fmt.Errorf("fetching sysext catalog: %w", err)
 	}
