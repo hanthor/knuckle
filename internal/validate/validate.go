@@ -143,17 +143,26 @@ func URL(s string) error {
 // IgnitionURL validates a remote Ignition config URL.
 // Requires https:// for remote URLs (Ignition configs may contain secrets).
 // Also allows file:// for local configs.
+// Rejects URLs with whitespace or shell metacharacters.
 func IgnitionURL(s string) error {
 	if s == "" {
 		return fmt.Errorf("ignition URL must not be empty")
 	}
-	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "file://") {
-		return nil
-	}
 	if strings.HasPrefix(s, "http://") {
 		return fmt.Errorf("ignition URL must use https:// (config may contain secrets); got http://")
 	}
-	return fmt.Errorf("ignition URL must start with https:// or file://")
+	if !strings.HasPrefix(s, "https://") && !strings.HasPrefix(s, "file://") {
+		return fmt.Errorf("ignition URL must start with https:// or file://")
+	}
+	// Reject URLs with whitespace or shell metacharacters.
+	// While exec.CommandContext prevents shell injection, malformed URLs
+	// would fail at fetch time — reject early with a clear error.
+	for _, c := range s {
+		if c <= ' ' || c == '`' || c == '|' || c == ';' || c == '&' || c == '$' || c == '(' || c == ')' || c == '\'' || c == '"' || c == '\\' || c == '{' || c == '}' || c == '<' || c == '>' {
+			return fmt.Errorf("ignition URL contains invalid character %q", c)
+		}
+	}
+	return nil
 }
 
 // NonEmpty validates that a string is not empty after trimming whitespace.

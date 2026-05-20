@@ -232,11 +232,18 @@ func TestIgnitionURL(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid https", "https://example.com/config.ign", false},
+		{"valid https with path", "https://myserver.example.com/nodes/prod-01.ign", false},
 		{"valid file", "file:///etc/ignition/config.ign", false},
 		{"rejects http", "http://example.com/config.ign", true},
 		{"rejects empty", "", true},
 		{"rejects bare path", "/etc/config.ign", true},
 		{"rejects ftp", "ftp://example.com/config.ign", true},
+		// Metacharacter tests — these document current permissive behavior
+		// flatcar-install receives them via argv (no shell injection possible)
+		// but they are still malformed URLs that will fail at fetch time
+		{"space in URL", "https://example.com/config file.ign", true},
+		{"newline in URL", "https://example.com/config\n.ign", true},
+		{"backtick in URL", "https://example.com/`id`", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
