@@ -483,7 +483,7 @@ vm-e2e:
     fi
 
     # docker must be callable (proves the sysext overlay is live)
-    if DOCKER_VER=$($E2E_SSH "docker version --format '{{.Server.Version}}'" 2>/dev/null); then
+    if DOCKER_VER=$($E2E_SSH "docker version --format '{{{{.Server.Version}}}}'" 2>/dev/null); then
         echo "  ✓ docker available from sysext: $DOCKER_VER"
     else
         echo "❌ docker not available — sysext not activated"

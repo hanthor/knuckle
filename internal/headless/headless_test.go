@@ -612,4 +612,3 @@ func TestResolveSysexts_Empty(t *testing.T) {
 		t.Error("bakery client should not be called when sysexts list is empty")
 	}
 }
-
