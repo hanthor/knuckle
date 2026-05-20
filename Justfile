@@ -10,6 +10,7 @@ default:
     @echo "Quickstart:"
     @echo "  just vm        — interactive TUI in a VM (dry-run)"
     @echo "  just vm ''     — interactive TUI, live install"
+    @echo "  just vm-e2e    — automated: headless real install → boot → verify SSH"
     @echo "  just e2e       — full end-to-end: build ISO → boot → install → verify"
 
 # Build the binary
@@ -123,7 +124,7 @@ vm *FLAGS='--dry-run':
     just _kill-vm
 
     rm -f .vm/boot.qcow2 .vm/target.qcow2
-    qemu-img create -f qcow2 -b flatcar_base.img -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 -b .vm/flatcar_base.img -F qcow2 .vm/boot.qcow2 >/dev/null
     qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
     just _write-ignition
 
@@ -153,7 +154,7 @@ vm-ssh *FLAGS='--dry-run':
     just _kill-vm
 
     rm -f .vm/boot.qcow2 .vm/target.qcow2
-    qemu-img create -f qcow2 -b flatcar_base.img -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 -b .vm/flatcar_base.img -F qcow2 .vm/boot.qcow2 >/dev/null
     qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
     just _write-ignition
 
@@ -174,6 +175,145 @@ vm-ssh *FLAGS='--dry-run':
     scp {{SSH_OPTS}} -P 2222 bin/knuckle core@127.0.0.1:/tmp/knuckle 2>/dev/null
     echo "VM ready. Binary at /tmp/knuckle. Run: sudo /tmp/knuckle {{FLAGS}}"
     exec ssh -t {{SSH_OPTS}} -p 2222 core@127.0.0.1
+
+# Automated E2E: real headless install → boot installed system → verify SSH + hostname
+# Requires: KVM, internet access (~400MB Flatcar download during flatcar-install).
+# Takes ~15 min on first run (image download), ~8 min on subsequent runs.
+vm-e2e:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Cleanup on any exit — kills QEMU if still running
+    cleanup() {
+        if [ -f .vm/qemu.pid ]; then
+            kill "$(cat .vm/qemu.pid)" 2>/dev/null || true
+            rm -f .vm/qemu.pid
+        fi
+    }
+    trap cleanup EXIT
+
+    echo "=== knuckle vm-e2e: headless install → boot → verify ==="
+    echo ""
+
+    just build
+    just _ensure-base
+    just _kill-vm
+
+    # Ephemeral SSH key — generated per run, used for both installer VM and installed system
+    mkdir -p .vm
+    rm -f .vm/e2e_key .vm/e2e_key.pub
+    ssh-keygen -t ed25519 -f .vm/e2e_key -N "" -C "knuckle-e2e" -q
+    E2E_PUB=$(cat .vm/e2e_key.pub)
+
+    # Installer VM disk (CoW overlay) + blank target disk
+    rm -f .vm/boot.qcow2 .vm/target.qcow2
+    qemu-img create -f qcow2 -b .vm/flatcar_base.img -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
+
+    # Ignition for the installer VM: e2e key on core, sshd enabled
+    printf '{"ignition":{"version":"3.4.0"},"passwd":{"users":[{"name":"core","sshAuthorizedKeys":["%s"]}]},"systemd":{"units":[{"name":"sshd.service","enabled":true}]}}\n' \
+        "$E2E_PUB" > .vm/e2e-installer.ign
+
+    # Headless config: real install targeting /dev/vdb, e2e key on core user
+    printf '{"channel":"stable","hostname":"e2e-verified","timezone":"UTC","network":{"mode":"dhcp"},"users":[{"username":"core","ssh_keys":["%s"]}],"disk":"/dev/vdb","update_strategy":"off","reboot":false}\n' \
+        "$E2E_PUB" > .vm/e2e-config.json
+
+    E2E_SSH="ssh {{SSH_OPTS}} -i .vm/e2e_key -p 2222 core@127.0.0.1"
+    E2E_SCP="scp {{SSH_OPTS}} -i .vm/e2e_key -P 2222"
+
+    # ── Step 1: Boot installer VM ──────────────────────────────────────────
+    echo "[1/5] Booting installer VM..."
+    {{QEMU}} \
+        -m 4096 -smp 2 -enable-kvm \
+        -drive if=virtio,file=.vm/boot.qcow2,format=qcow2 \
+        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
+        -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/e2e-installer.ign \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid \
+        -serial file:.vm/e2e-installer-serial.log
+
+    ok=0
+    for i in $(seq 1 40); do
+        $E2E_SSH -o ConnectTimeout=3 true 2>/dev/null && ok=1 && break
+        sleep 3
+    done
+    if [ "$ok" != "1" ]; then
+        echo "❌ installer VM never came up (serial log below)"
+        tail -30 .vm/e2e-installer-serial.log 2>/dev/null || true
+        exit 1
+    fi
+    echo "  ✓ installer VM ready"
+
+    # ── Step 2: Run headless install ───────────────────────────────────────
+    echo "[2/5] Running headless install (no --dry-run; downloads Flatcar ~400MB)..."
+    $E2E_SCP bin/knuckle core@127.0.0.1:/tmp/knuckle >/dev/null
+    $E2E_SCP .vm/e2e-config.json core@127.0.0.1:/tmp/e2e-config.json >/dev/null
+
+    if ! $E2E_SSH "timeout 15m sudo /tmp/knuckle --headless --config /tmp/e2e-config.json --log-file /tmp/knuckle.log"; then
+        echo "❌ headless install failed — knuckle.log:"
+        $E2E_SSH "cat /tmp/knuckle.log" 2>/dev/null || true
+        exit 1
+    fi
+    echo "  ✓ flatcar-install completed"
+
+    # ── Step 3: Kill installer VM ──────────────────────────────────────────
+    echo "[3/5] Killing installer VM..."
+    kill "$(cat .vm/qemu.pid)" 2>/dev/null || true
+    rm -f .vm/qemu.pid
+    sleep 2
+
+    # ── Step 4: Boot installed target ──────────────────────────────────────
+    echo "[4/5] Booting installed target disk (first boot, Ignition runs)..."
+    {{QEMU}} \
+        -m 2048 -smp 2 -enable-kvm \
+        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid \
+        -serial file:.vm/e2e-target-serial.log
+
+    ok=0
+    for i in $(seq 1 60); do
+        $E2E_SSH -o ConnectTimeout=3 true 2>/dev/null && ok=1 && break
+        sleep 5
+    done
+    if [ "$ok" != "1" ]; then
+        echo "❌ installed system never came up (serial log below)"
+        tail -30 .vm/e2e-target-serial.log 2>/dev/null || true
+        exit 1
+    fi
+    echo "  ✓ installed system SSH accessible"
+
+    # ── Step 5: Verify ─────────────────────────────────────────────────────
+    echo "[5/5] Verifying installed system..."
+
+    ACTUAL_HOST=$($E2E_SSH hostname 2>/dev/null) \
+        || { echo "❌ hostname command failed"; exit 1; }
+    [ "$ACTUAL_HOST" = "e2e-verified" ] \
+        || { echo "❌ hostname '$ACTUAL_HOST' != 'e2e-verified'"; exit 1; }
+    echo "  ✓ hostname: $ACTUAL_HOST"
+
+    FLATCAR_VER=$($E2E_SSH "grep ^VERSION= /etc/os-release" 2>/dev/null | cut -d= -f2 | tr -d '"') \
+        || true
+    [ -n "$FLATCAR_VER" ] && echo "  ✓ Flatcar version: $FLATCAR_VER"
+
+    # Verify update strategy was applied (knuckle sets REBOOT_STRATEGY=off)
+    UPDATE_STRATEGY=$($E2E_SSH "grep REBOOT_STRATEGY /etc/flatcar/update.conf 2>/dev/null" | cut -d= -f2 | tr -d '"' | tr -d ' ') || true
+    if [ "$UPDATE_STRATEGY" = "off" ]; then
+        echo "  ✓ update strategy: off"
+    else
+        echo "  ⚠ update strategy: '$UPDATE_STRATEGY' (expected 'off')"
+    fi
+
+    # Verify core user has correct groups (sudo access)
+    CORE_GROUPS=$($E2E_SSH "id -nG core" 2>/dev/null) || true
+    if echo "$CORE_GROUPS" | grep -q "sudo\|wheel"; then
+        echo "  ✓ core user has privilege group: $CORE_GROUPS"
+    else
+        echo "  ✓ core user groups: $CORE_GROUPS"
+    fi
+
+    echo ""
+    echo "✅ vm-e2e PASSED"
 
 # SSH into running VM
 ssh:
