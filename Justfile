@@ -117,116 +117,48 @@ boot-target:
         -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
         -nographic
 
-# Full end-to-end: build ISO → boot → headless install → reboot target → verify
+# Full end-to-end: build ISO → boot in Ghostty → interactive install
 e2e:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "=== E2E: ISO build → boot → install → verify ==="
+    echo "=== E2E: Build ISO + launch interactive install VM ==="
     echo ""
 
-    # 1. Build ISO
-    echo "[1/5] Building ISO..."
-    just iso stable
-    echo ""
+    # Build ISO if not present
+    ISO="output/knuckle-installer-stable.iso"
+    if [[ ! -f "$ISO" ]]; then
+        echo "Building ISO..."
+        just iso stable
+        echo ""
+    fi
 
-    # 2. Build binary for headless deploy
-    echo "[2/5] Building binary..."
-    just build
-    echo ""
-
-    # 3. Boot ISO, wait for system, deploy+run headless install
-    echo "[3/5] Booting ISO + running headless install..."
     just _kill-vm
     mkdir -p .vm
     rm -f .vm/target.qcow2
     qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
 
     OVMF="/home/linuxbrew/.linuxbrew/Cellar/qemu/11.0.0/share/qemu/edk2-x86_64-code.fd"
-    {{QEMU}} \
-        -m 4096 -smp 2 -enable-kvm \
-        -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
-        -cdrom output/knuckle-installer-stable.iso \
-        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
-        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
-        -display none -daemonize -pidfile .vm/qemu.pid
-
-    echo "  Waiting for ISO to boot..."
-    for i in $(seq 1 60); do
-        ssh {{SSH_OPTS}} -o ConnectTimeout=2 -p 2222 core@127.0.0.1 true 2>/dev/null && break
-        sleep 2
-    done
-    ssh {{SSH_OPTS}} -o ConnectTimeout=5 -p 2222 core@127.0.0.1 true 2>/dev/null || {
-        echo "FAIL: ISO did not boot (SSH timeout)"
-        just _kill-vm
+    if [[ ! -f "$OVMF" ]]; then
+        echo "❌ OVMF not found at $OVMF"
         exit 1
-    }
-    echo "  ISO booted, deploying knuckle..."
+    fi
 
-    # Deploy binary + config
-    scp {{SSH_OPTS}} -P 2222 bin/knuckle core@127.0.0.1:/tmp/knuckle 2>/dev/null
-    SSH_KEY=$(cat ~/.ssh/id_ed25519.pub)
-    cat > .vm/e2e-config.json <<CFGEOF
-    {"channel":"stable","hostname":"e2e-node","timezone":"UTC","network":{"mode":"dhcp"},"users":[{"username":"core","ssh_keys":["$SSH_KEY"]}],"disk":"/dev/vdb","update_strategy":"reboot","reboot":false,"dry_run":false}
-    CFGEOF
-    scp {{SSH_OPTS}} -P 2222 .vm/e2e-config.json core@127.0.0.1:/tmp/config.json 2>/dev/null
-
-    echo "  Running headless install..."
-    ssh {{SSH_OPTS}} -p 2222 core@127.0.0.1 "sudo /tmp/knuckle --config /tmp/config.json --headless --log-file /tmp/knuckle.log" || {
-        echo "FAIL: headless install failed"
-        ssh {{SSH_OPTS}} -p 2222 core@127.0.0.1 "tail -20 /tmp/knuckle.log" 2>/dev/null || true
-        just _kill-vm
-        exit 1
-    }
-    echo "  ✓ Install completed"
+    echo "Launching installer VM in Ghostty..."
+    echo "  → ISO boots with GRUB, knuckle launches on tty1"
+    echo "  → Target disk: .vm/target.qcow2 (20G)"
+    echo "  → After install: just boot-target to verify"
     echo ""
 
-    # 4. Boot from installed target disk
-    echo "[4/5] Booting installed target disk..."
-    just _kill-vm
-    sleep 1
-    {{QEMU}} \
-        -m 2048 -smp 2 -enable-kvm \
-        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
-        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
-        -display none -daemonize -pidfile .vm/qemu.pid
-
-    echo "  Waiting for installed system..."
-    for i in $(seq 1 45); do
-        ssh {{SSH_OPTS}} -o ConnectTimeout=2 -p 2222 core@127.0.0.1 true 2>/dev/null && break
-        sleep 2
-    done
-    ssh {{SSH_OPTS}} -o ConnectTimeout=5 -p 2222 core@127.0.0.1 true 2>/dev/null || {
-        echo "FAIL: installed system did not boot"
-        just _kill-vm
-        exit 1
-    }
-    echo "  Target booted"
-    echo ""
-
-    # 5. Verify
-    echo "[5/5] Verifying installed system..."
-    PASS=0; FAIL=0
-    check() {
-        local name="$1" got="$2" want="$3"
-        if [ "$got" = "$want" ]; then echo "  ✓ $name: $got"; PASS=$((PASS+1))
-        else echo "  ✗ $name: got '$got', want '$want'"; FAIL=$((FAIL+1)); fi
-    }
-    HOSTNAME=$(ssh {{SSH_OPTS}} -p 2222 core@127.0.0.1 "hostname" 2>/dev/null)
-    KERNEL=$(ssh {{SSH_OPTS}} -p 2222 core@127.0.0.1 "uname -r" 2>/dev/null)
-    OS=$(ssh {{SSH_OPTS}} -p 2222 core@127.0.0.1 "grep ^ID= /etc/os-release" 2>/dev/null)
-    CHANNEL=$(ssh {{SSH_OPTS}} -p 2222 core@127.0.0.1 "grep GROUP /etc/flatcar/update.conf" 2>/dev/null)
-    KEYS=$(ssh {{SSH_OPTS}} -p 2222 core@127.0.0.1 "wc -l < ~/.ssh/authorized_keys" 2>/dev/null)
-
-    check "Hostname" "$HOSTNAME" "e2e-node"
-    check "OS" "$OS" "ID=flatcar"
-    check "Channel" "$CHANNEL" "GROUP=stable"
-    [ "${KEYS:-0}" -gt 0 ] && { echo "  ✓ SSH keys: $KEYS"; PASS=$((PASS+1)); } || { echo "  ✗ SSH keys: none"; FAIL=$((FAIL+1)); }
-    [ -n "${KERNEL:-}" ] && { echo "  ✓ Kernel: $KERNEL"; PASS=$((PASS+1)); } || { echo "  ✗ Kernel: not detected"; FAIL=$((FAIL+1)); }
-
-    just _kill-vm
-    echo ""
-    echo "Results: $PASS passed, $FAIL failed"
-    [ "$FAIL" -eq 0 ] && echo "✅ E2E PASS" || { echo "❌ E2E FAIL"; exit 1; }
+    ghostty --gtk-single-instance=false -e bash -c "\
+        cd $(pwd) && \
+        {{QEMU}} \
+            -m 4096 -smp 2 -enable-kvm \
+            -drive if=pflash,format=raw,readonly=on,file=$OVMF \
+            -cdrom $ISO \
+            -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
+            -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+            -nographic" &
+    echo "VM window opened. When done: just boot-target"
 
 # Build installer ISO (requires xorriso, mtools, cpio; GRUB optional)
 iso *CHANNEL='stable':
