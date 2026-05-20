@@ -27,7 +27,7 @@ This document covers each.
 | Sysext catalog                | Malicious release injected into `flatcar/sysext-bakery` | GitHub Releases API only; *no* signature verification — see Known Gaps          |
 | GitHub SSH key fetch          | API impersonation                                   | TLS + hostname pinned to `github.com`                                            |
 | Logs (`/tmp/knuckle.log`)     | Leak SSH keys / hashes                              | Logger writes structured `slog` events; secrets are not logged. Verify in review |
-| Reboot                        | Unintended reboot in test                           | Gated by `--dry-run` and double-key (`r` twice) in TUI                            |
+| Reboot                        | Unintended reboot in test                           | Double-key (`r` twice) confirmation in TUI; headless never reboots host            |
 
 ## Supply Chain
 
@@ -71,17 +71,30 @@ The same pattern applies to `knuckle-installer-stable.iso` / `knuckle-installer-
 
 ### Known gaps (tracked, not fixed)
 
+- **N-SEC1 MEDIUM — sysext download URLs are not length-checked.** `bakery.go`
+  writes user-supplied sysext URLs into the Ignition config without a max-length
+  guard. A very long URL is legal YAML but could produce an oversized Ignition
+  file. Tracked MEDIUM.
+- **N-SEC3 LOW — release server URLs are DNS-trusted.** `channels.go` contacts
+  `{stable,beta,alpha,lts}.release.flatcar-linux.net` but only verifies TLS; no
+  hostname pinning beyond the certificate chain. Acceptable for the threat model
+  but worth noting.
 - **Flatcar release GPG signatures are presence-checked, not verified.**
   `channels.go` sets `info.SignedDigest = true` purely on the existence of
   `.DIGESTS.asc`. The signature is never validated against the embedded Flatcar
   release key. Note: this is about verifying *Flatcar's* upstream artifacts,
-  not knuckle's own binaries (which use cosign). Tracked HIGH.
+  not knuckle's own binaries (which use cosign). Tracked LOW (cosign covers
+  the knuckle supply chain; Flatcar's own verification is out of scope).
 - **Sysext bakery downloads are unverified.** `internal/bakery/bakery.go`
   reads the GitHub Releases API but does not validate the `.sha256` or `.sig`
-  alongside each `.raw` artifact. Tracked HIGH.
+  alongside each `.raw` artifact. Tracked MEDIUM.
 - **No fuzz testing on input parsers.** `internal/validate`,
   `internal/ignition` parsers are reachable from user input but not fuzzed.
   Tracked MEDIUM.
+- **TOCTOU LOW in `WriteIgnitionFile`.** `os.CreateTemp` creates the file with
+  correct mode on Linux (kernel enforces O_EXCL atomically), but a `chmod 0600`
+  call follows the `CreateTemp`. The window is theoretical on any modern Linux
+  with a private temp dir. Acknowledged, not fixed.
 
 These gaps are listed because lying about them is worse than having them.
 Don't claim verification in a PR description without checking the code.
