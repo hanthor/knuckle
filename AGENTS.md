@@ -85,15 +85,15 @@ just e2e                 # build ISO → boot in QEMU GTK window → interactive
 | `internal/model`  | Pure data types — `InstallConfig`, `DiskInfo`, `NetworkInterface`  | 100%     |
 | `internal/runner` | `Runner` interface: `RealRunner`, `DryRunner`, `SpyRunner`         | 81%      |
 | `internal/probe`  | `lsblk` + `ip addr` JSON parsing, `/dev/disk/by-id` resolution     | 81%      |
-| `internal/validate` | Hostname, CIDR, gateway, SSH key, timezone, disk path validators | 88%      |
-| `internal/bakery` | sysext catalog + Flatcar release/SBOM fetchers, SHA512 check       | 84%      |
+| `internal/validate` | Hostname, CIDR, gateway, SSH key, timezone, disk path validators | 97%      |
+| `internal/bakery` | sysext catalog + Flatcar release/SBOM fetchers, SHA512 check       | 85%      |
 | `internal/github` | SSH key fetch + GitHub Releases API client                         | 90%      |
-| `internal/ignition` | Butane assembly + in-process Butane→Ignition compilation         | 92%      |
+| `internal/ignition` | Butane assembly + in-process Butane→Ignition compilation         | 93%      |
 | `internal/install` | `flatcar-install` orchestration via runner                        | 76%      |
 | `internal/iso`    | Installer ISO builder helpers                                      | 100%     |
-| `internal/headless` | `--headless --config` JSON-driven install path                   | 75%      |
-| `internal/wizard` | Step state machine, navigation, validation gates                   | 80%      |
-| `internal/tui`    | Bubble Tea view models (one sub-model per step), forms             | 46%      |
+| `internal/headless` | `--headless --config` JSON-driven install path                   | 87%      |
+| `internal/wizard` | Step state machine, navigation, validation gates                   | 81%      |
+| `internal/tui`    | Bubble Tea view models (one sub-model per step), forms             | 52%      |
 
 Targets enforced by `just cover-check` are deliberately set ≤ current numbers
 so the gate guards against *regression*. Long-term aspirations live in
@@ -160,7 +160,7 @@ tui      ← cmd/knuckle
 | Integration  | `//go:build integration` (not in CI)   | Real network: GitHub API, Flatcar release server    |
 | Headless e2e | `just headless-test`                   | Build + canned JSON config, runs on host (CI gate)  |
 | VM           | `just vm`                              | Install in QEMU, auto-boots installed system after  |
-| VM automated | `just vm-e2e`                          | Headless install → boot → SSH/hostname verify       |
+| VM automated | `just vm-e2e`                          | 3-pass: DHCP, static network, sysext (docker) — fully automated |
 | ISO e2e      | `just e2e`                             | Build ISO → boot in QEMU → interactive install      |
 
 CI today runs unit + race + lint + vuln + coverage gate. Integration and VM
@@ -294,7 +294,7 @@ just vm      # go through the full TUI, confirm install completes and SSH works
 just vm-e2e  # automated pass — must exit 0
 ```
 
-The most recent review record is `docs/REVIEW-2026-05-19.md`.
+The most recent review record is `docs/REVIEW-2026-05-20.md`.
 
 ---
 
