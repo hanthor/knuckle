@@ -10,9 +10,11 @@ This is also basically [Azure Container Linux (Home Edition)](https://opensource
 
 ## Why
 
-Flatcar is typically provisioned in cloud environments via Butane and ignition configs and wraps it in a usable UX. Flatcar is also in the [CNCF](https://cncf.io), which means there's a core operating system in a vendor-neutral Foundation. The kind of tech that will stick around in the long term. Perfect for home servers, NAS builds, cluster setups, you name it. 
+Flatcar is typically provisioned in cloud environments via Butane and ignition configs and wraps it in a usable UX. Flatcar is also in the [CNCF](https://cncf.io), which means there's a core operating system in a vendor-neutral Foundation. The kind of tech that will stick around in the long term. Perfect for home servers, NAS builds, k8s cluster setups, you name it. The [Flatcar Bakery](https://flatcar.github.io/sysext-bakery/) support for built in systemd system extension support in the installer UI. 
 
 ![progress](https://github.com/user-attachments/assets/0d4160da-8731-4a92-b103-98b901dd9c3d)
+![sysexts](https://github.com/user-attachments/assets/86f0c439-4c27-4c04-a2fc-880d499f7c28)
+
 
 ## Features
 
