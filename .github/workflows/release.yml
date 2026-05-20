@@ -6,11 +6,15 @@ on:
 
 permissions:
   contents: write
-  id-token: write  # required for cosign keyless OIDC signing
+  id-token: write      # cosign keyless OIDC signing
+  packages: write      # push to GHCR via oras
+  attestations: write  # SLSA provenance
+
+env:
+  IMAGE_REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # amd64 job runs first and creates the release with auto-generated notes.
-  # arm64 waits via `needs` to avoid a race on release creation.
   release-amd64:
     name: Release (amd64)
     runs-on: ubuntu-latest
@@ -23,6 +27,10 @@ jobs:
           check-latest: true
 
       - uses: sigstore/cosign-installer@v3
+
+      - uses: oras-project/setup-oras@v2
+
+      - uses: anchore/sbom-action/download-syft@v0
 
       - name: Build binary
         run: |
@@ -46,11 +54,11 @@ jobs:
             > knuckle-installer-stable-amd64.iso.sha256
 
       - name: Generate SBOM (SPDX)
-        uses: anchore/sbom-action@v0
-        with:
-          artifact-name: knuckle-linux-amd64.spdx.json
-          output-file: knuckle-linux-amd64.spdx.json
-          format: spdx-json
+        run: |
+          syft knuckle-linux-amd64 \
+            --output spdx-json=knuckle-linux-amd64.spdx.json \
+            --source-name knuckle \
+            --source-version "${GITHUB_REF_NAME}"
 
       - name: Sign artifacts with cosign (keyless, Sigstore)
         run: |
@@ -63,6 +71,36 @@ jobs:
           cosign sign-blob --yes \
             --bundle knuckle-linux-amd64.spdx.json.bundle \
             knuckle-linux-amd64.spdx.json
+
+      - name: Push binary to GHCR and attach SBOM via oras
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${GHCR_TOKEN}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+          # Push binary as OCI artifact
+          DIGEST=$(oras push \
+            --format json \
+            "${IMAGE_REGISTRY}/${IMAGE_NAME}/knuckle-linux-amd64:${GITHUB_REF_NAME}" \
+            knuckle-linux-amd64:application/octet-stream \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['digest'])")
+
+          # Attach SBOM as referrer
+          SBOM_DIGEST=$(oras attach \
+            --artifact-type application/vnd.spdx+json \
+            --format json \
+            "${IMAGE_REGISTRY}/${IMAGE_NAME}/knuckle-linux-amd64@${DIGEST}" \
+            knuckle-linux-amd64.spdx.json:application/vnd.spdx+json \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['digest'])")
+
+          # Sign both with cosign
+          cosign sign -y "${IMAGE_REGISTRY}/${IMAGE_NAME}/knuckle-linux-amd64@${DIGEST}"
+          cosign sign -y "${IMAGE_REGISTRY}/${IMAGE_NAME}/knuckle-linux-amd64@${SBOM_DIGEST}"
+
+      - name: SLSA provenance attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: knuckle-linux-amd64
 
       - name: Create release and upload amd64 artifacts
         uses: softprops/action-gh-release@v2
@@ -81,7 +119,7 @@ jobs:
   release-arm64:
     name: Release (arm64)
     runs-on: ubuntu-24.04-arm
-    needs: release-amd64  # wait for release to exist before uploading
+    needs: release-amd64
     steps:
       - uses: actions/checkout@v4
 
@@ -91,6 +129,10 @@ jobs:
           check-latest: true
 
       - uses: sigstore/cosign-installer@v3
+
+      - uses: oras-project/setup-oras@v2
+
+      - uses: anchore/sbom-action/download-syft@v0
 
       - name: Build binary
         run: |
@@ -114,11 +156,11 @@ jobs:
             > knuckle-installer-stable-arm64.iso.sha256
 
       - name: Generate SBOM (SPDX)
-        uses: anchore/sbom-action@v0
-        with:
-          artifact-name: knuckle-linux-arm64.spdx.json
-          output-file: knuckle-linux-arm64.spdx.json
-          format: spdx-json
+        run: |
+          syft knuckle-linux-arm64 \
+            --output spdx-json=knuckle-linux-arm64.spdx.json \
+            --source-name knuckle \
+            --source-version "${GITHUB_REF_NAME}"
 
       - name: Sign artifacts with cosign (keyless, Sigstore)
         run: |
@@ -132,10 +174,40 @@ jobs:
             --bundle knuckle-linux-arm64.spdx.json.bundle \
             knuckle-linux-arm64.spdx.json
 
+      - name: Push binary to GHCR and attach SBOM via oras
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${GHCR_TOKEN}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+          # Push binary as OCI artifact
+          DIGEST=$(oras push \
+            --format json \
+            "${IMAGE_REGISTRY}/${IMAGE_NAME}/knuckle-linux-arm64:${GITHUB_REF_NAME}" \
+            knuckle-linux-arm64:application/octet-stream \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['digest'])")
+
+          # Attach SBOM as referrer
+          SBOM_DIGEST=$(oras attach \
+            --artifact-type application/vnd.spdx+json \
+            --format json \
+            "${IMAGE_REGISTRY}/${IMAGE_NAME}/knuckle-linux-arm64@${DIGEST}" \
+            knuckle-linux-arm64.spdx.json:application/vnd.spdx+json \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['digest'])")
+
+          # Sign both with cosign
+          cosign sign -y "${IMAGE_REGISTRY}/${IMAGE_NAME}/knuckle-linux-arm64@${DIGEST}"
+          cosign sign -y "${IMAGE_REGISTRY}/${IMAGE_NAME}/knuckle-linux-arm64@${SBOM_DIGEST}"
+
+      - name: SLSA provenance attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: knuckle-linux-arm64
+
       - name: Upload arm64 artifacts to existing release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: false  # release already has notes from amd64 job
+          generate_release_notes: false
           files: |
             knuckle-linux-arm64
             knuckle-linux-arm64.sha256
