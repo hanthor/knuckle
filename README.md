@@ -19,7 +19,7 @@ Flatcar is typically provisioned in cloud environments via Ignition configs. Bar
 - **Hardware probing** — automatic disk and network interface discovery with `/dev/disk/by-id` path resolution
 - **Network configuration** — DHCP or static IPv4
 - **User setup** — hostname, timezone, password (bcrypt hashed), GitHub SSH key fetching with multi-key support, local `~/.ssh/*.pub` auto-detection
-- **System extensions** — architecture-aware sysext catalog fetched from GitHub Releases API ([flatcar/sysext-bakery](https://github.com/flatcar/sysext-bakery)), with GPG-verified SHA512 digests
+- **System extensions** — architecture-aware sysext catalog fetched via TLS from [flatcar/sysext-bakery](https://github.com/flatcar/sysext-bakery) GitHub Releases API (not yet cryptographically verified — see [docs/SECURITY.md](docs/SECURITY.md))
 - **Update strategy** — reboot, off, or etcd-lock options
 - **Review screen** — full Butane YAML preview before install
 - **Install step** — progress bar, wraps `flatcar-install` for disk provisioning
