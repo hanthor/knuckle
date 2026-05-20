@@ -1,99 +1,149 @@
 #!/usr/bin/env bash
 # Build a UEFI-bootable ISO containing Flatcar Linux + knuckle installer.
 #
+# Uses systemd-boot (UEFI-only, BLS entries). GRUB is not used.
 # The ISO boots into a live Flatcar environment with knuckle auto-launching
 # on the console. No network required during boot.
 #
-# Requirements: xorriso, mformat, mcopy (mtools), cpio, gzip
-# Usage: ./scripts/build-iso.sh [--channel stable|beta|alpha|lts]
+# Requirements (Linux): xorriso mformat mcopy (mtools) cpio gzip systemd-boot-efi
+#   Ubuntu:  sudo apt-get install -y xorriso mtools cpio systemd-boot-efi
+#   Fedora:  sudo dnf install -y xorriso mtools cpio systemd-boot-unsigned
+#
+# Usage: ./scripts/build-iso.sh [--channel stable|beta|alpha|lts] [--binary /path/to/knuckle]
 set -euo pipefail
 
-CHANNEL="${1:-stable}"
-CHANNEL="${CHANNEL#--channel=}"
-CHANNEL="${CHANNEL#--channel }"
-[[ "$CHANNEL" == --channel ]] && CHANNEL="${2:-stable}"
+# ── Argument parsing ─────────────────────────────────────────────────────────
+CHANNEL="stable"
+BINARY_OVERRIDE=""
 
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --channel=*) CHANNEL="${1#--channel=}"; shift ;;
+        --channel)   CHANNEL="$2"; shift 2 ;;
+        --binary=*)  BINARY_OVERRIDE="${1#--binary=}"; shift ;;
+        --binary)    BINARY_OVERRIDE="$2"; shift 2 ;;
+        stable|beta|alpha|lts) CHANNEL="$1"; shift ;;
+        *) echo "Unknown argument: $1" >&2; exit 1 ;;
+    esac
+done
+
+# ── Paths ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/.iso-build"
 OUTPUT_DIR="$ROOT_DIR/output"
-BINARY="$ROOT_DIR/bin/knuckle"
 
-# Flatcar release URL
+if [[ -n "$BINARY_OVERRIDE" ]]; then
+    BINARY="$BINARY_OVERRIDE"
+elif [[ -f "$ROOT_DIR/knuckle" ]]; then
+    # CI: built binary placed at repo root
+    BINARY="$ROOT_DIR/knuckle"
+else
+    BINARY="$ROOT_DIR/bin/knuckle"
+fi
+
 if [[ "$CHANNEL" == "lts" ]]; then
     BASE_URL="https://lts.release.flatcar-linux.net/amd64-usr/current"
 else
     BASE_URL="https://${CHANNEL}.release.flatcar-linux.net/amd64-usr/current"
 fi
 
-echo "=== Building knuckle installer ISO (channel: $CHANNEL) ==="
-
-# Check dependencies
-for cmd in xorriso mformat mcopy cpio gzip; do
+# ── Dependency check ─────────────────────────────────────────────────────────
+for cmd in xorriso mformat mcopy mmd cpio gzip; do
     if ! command -v "$cmd" &>/dev/null; then
-        echo "❌ Missing: $cmd"
-        echo "Install: brew install xorriso mtools cpio"
+        echo "Missing: $cmd" >&2
+        echo "  Ubuntu: sudo apt-get install -y xorriso mtools cpio" >&2
         exit 1
     fi
 done
 
-# Find grub-mkstandalone (various names across distros)
-GRUB_MKSTANDALONE=""
-for name in grub-mkstandalone grub2-mkstandalone x86_64-elf-grub-mkstandalone; do
-    if command -v "$name" &>/dev/null; then
-        GRUB_MKSTANDALONE="$name"
+# Locate systemd-boot EFI binary (UEFI-only; no GRUB)
+SDBOOT_EFI=""
+for candidate in \
+    /usr/lib/systemd/boot/efi/systemd-bootx64.efi \
+    /lib/systemd/boot/efi/systemd-bootx64.efi \
+    /usr/share/systemd/boot/efi/systemd-bootx64.efi; do
+    if [[ -f "$candidate" ]]; then
+        SDBOOT_EFI="$candidate"
         break
     fi
 done
-if [[ -z "$GRUB_MKSTANDALONE" ]]; then
-    echo "❌ Missing: grub-mkstandalone"
-    echo "Install: brew install x86_64-elf-grub (or grub2-tools-efi on Fedora)"
+if [[ -z "$SDBOOT_EFI" ]]; then
+    echo "Missing: systemd-bootx64.efi" >&2
+    echo "  Ubuntu: sudo apt-get install -y systemd-boot-efi" >&2
+    echo "  Fedora: sudo dnf install -y systemd-boot-unsigned" >&2
     exit 1
 fi
 
-# 1. Build knuckle binary
-echo "[1/6] Building knuckle..."
-(cd "$ROOT_DIR" && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/knuckle ./cmd/knuckle)
+echo "=== Building knuckle installer ISO (channel: $CHANNEL) ==="
+echo "  systemd-boot: $SDBOOT_EFI"
 
-# 2. Download Flatcar PXE artifacts
+# ── 1. Build knuckle binary (skipped when binary already present) ─────────────
+if [[ ! -f "$BINARY" ]]; then
+    echo "[1/5] Building knuckle..."
+    (cd "$ROOT_DIR" && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+        go build -ldflags="-s -w" -o bin/knuckle ./cmd/knuckle)
+    BINARY="$ROOT_DIR/bin/knuckle"
+else
+    echo "[1/5] Using existing knuckle binary: $BINARY"
+fi
+
+# ── 2. Download Flatcar PXE artifacts ────────────────────────────────────────
 mkdir -p "$BUILD_DIR"
-echo "[2/6] Downloading Flatcar PXE artifacts ($CHANNEL)..."
+echo "[2/5] Fetching Flatcar PXE artifacts ($CHANNEL)..."
 
 KERNEL="$BUILD_DIR/vmlinuz"
 INITRD="$BUILD_DIR/initrd.cpio.gz"
 
 if [[ ! -f "$KERNEL" ]]; then
-    curl -L -o "$KERNEL" "$BASE_URL/flatcar_production_pxe.vmlinuz"
+    curl -fsSL -o "$KERNEL" "$BASE_URL/flatcar_production_pxe.vmlinuz"
 fi
 if [[ ! -f "$INITRD" ]]; then
-    curl -L -o "$INITRD" "$BASE_URL/flatcar_production_pxe_image.cpio.gz"
+    curl -fsSL -o "$INITRD" "$BASE_URL/flatcar_production_pxe_image.cpio.gz"
 fi
 
-echo "  kernel: $(du -h "$KERNEL" | cut -f1)"
-echo "  initrd: $(du -h "$INITRD" | cut -f1)"
+echo "  kernel : $(du -h "$KERNEL"  | cut -f1)"
+echo "  initrd : $(du -h "$INITRD"  | cut -f1)"
 
-# 3. Create supplemental cpio with knuckle + Ignition + systemd unit
-echo "[3/6] Creating knuckle overlay..."
+# ── 3. Build supplemental cpio overlay ───────────────────────────────────────
+echo "[3/5] Building knuckle overlay..."
 
 OVERLAY_DIR="$BUILD_DIR/overlay"
 rm -rf "$OVERLAY_DIR"
-mkdir -p "$OVERLAY_DIR/opt"
-mkdir -p "$OVERLAY_DIR/etc/systemd/system/multi-user.target.wants"
-mkdir -p "$OVERLAY_DIR/etc/systemd/system"
+mkdir -p \
+    "$OVERLAY_DIR/opt" \
+    "$OVERLAY_DIR/etc/systemd/system/multi-user.target.wants" \
+    "$OVERLAY_DIR/etc/systemd/system"
 
-# Binary
 cp "$BINARY" "$OVERLAY_DIR/opt/knuckle"
 chmod 755 "$OVERLAY_DIR/opt/knuckle"
 
-# Systemd unit — launches knuckle on tty1
-printf '[Unit]\nDescription=Knuckle Flatcar Installer\nAfter=multi-user.target network-online.target\nWants=network-online.target\nConditionPathExists=/opt/knuckle\n\n[Service]\nType=idle\nExecStart=/opt/knuckle --log-file /tmp/knuckle.log\nStandardInput=tty\nStandardOutput=tty\nTTYPath=/dev/tty1\nTTYReset=yes\nTTYVHangup=yes\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=multi-user.target\n' \
-    > "$OVERLAY_DIR/etc/systemd/system/knuckle-installer.service"
+cat > "$OVERLAY_DIR/etc/systemd/system/knuckle-installer.service" <<'UNIT'
+[Unit]
+Description=Knuckle Flatcar Installer
+After=multi-user.target network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/knuckle
 
-# Enable the unit
+[Service]
+Type=idle
+ExecStart=/opt/knuckle --log-file /tmp/knuckle.log
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 ln -sf /etc/systemd/system/knuckle-installer.service \
     "$OVERLAY_DIR/etc/systemd/system/multi-user.target.wants/knuckle-installer.service"
 
-# Add SSH key for the live ISO environment (so we can test via SSH)
+# Optional: carry the build host's SSH key into the live environment
 if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
     mkdir -p "$OVERLAY_DIR/home/core/.ssh"
     cp "$HOME/.ssh/id_ed25519.pub" "$OVERLAY_DIR/home/core/.ssh/authorized_keys"
@@ -101,64 +151,60 @@ if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
     chmod 600 "$OVERLAY_DIR/home/core/.ssh/authorized_keys"
 fi
 
-# Build supplemental cpio archive (newc format, appended to initrd)
 OVERLAY_CPIO="$BUILD_DIR/knuckle-overlay.cpio.gz"
 (cd "$OVERLAY_DIR" && find . | cpio -o -H newc 2>/dev/null | gzip > "$OVERLAY_CPIO")
 echo "  overlay: $(du -h "$OVERLAY_CPIO" | cut -f1)"
 
-# 4. Concatenate initrd + overlay (Linux supports multiple cpio in initramfs)
-echo "[4/6] Combining initramfs..."
+# Concatenate: Linux supports multiple cpio archives in initramfs
 COMBINED_INITRD="$BUILD_DIR/combined-initrd.img"
 cat "$INITRD" "$OVERLAY_CPIO" > "$COMBINED_INITRD"
 echo "  combined: $(du -h "$COMBINED_INITRD" | cut -f1)"
 
-# 5. Build EFI system partition with GRUB
-echo "[5/6] Building EFI boot image..."
+# ── 4. Build FAT32 ESP with systemd-boot ─────────────────────────────────────
+echo "[4/5] Building EFI System Partition (systemd-boot)..."
 
-# GRUB config
-GRUB_CFG="$BUILD_DIR/grub.cfg"
-printf 'insmod fat\ninsmod part_gpt\ninsmod search\nsearch --no-floppy --file /vmlinuz --set=root\nset timeout=3\nset default=0\n\nmenuentry "Knuckle - Install Flatcar Container Linux" {\n    linux /vmlinuz flatcar.autologin=tty1 console=tty0 console=ttyS0\n    initrd /initrd.img\n}\n\nmenuentry "Knuckle - Install (serial console)" {\n    linux /vmlinuz flatcar.autologin=ttyS0 console=ttyS0\n    initrd /initrd.img\n}\n' > "$GRUB_CFG"
-
-# Build standalone GRUB EFI binary with embedded config
-GRUB_DIR="/home/linuxbrew/.linuxbrew/lib/x86_64-elf/grub/x86_64-efi"
-if [[ ! -d "$GRUB_DIR" ]]; then
-    GRUB_DIR=$(dirname $(find /home/linuxbrew -name "fat.mod" -path "*x86_64-efi*" 2>/dev/null | head -1))
-fi
-$GRUB_MKSTANDALONE \
-    --format=x86_64-efi \
-    --output="$BUILD_DIR/BOOTX64.EFI" \
-    --locales="" \
-    --fonts="" \
-    --modules="fat part_gpt part_msdos normal linux all_video" \
-    "boot/grub/grub.cfg=$GRUB_CFG"
-
-# Size ESP to fit kernel + initrd + GRUB
+# Size: kernel + combined-initrd + small EFI binary + BLS files + 32 MB slack
 INITRD_SIZE=$(stat -c%s "$COMBINED_INITRD")
 KERNEL_SIZE=$(stat -c%s "$KERNEL")
-GRUB_SIZE=$(stat -c%s "$BUILD_DIR/BOOTX64.EFI")
-ESP_SIZE_MB=$(( (INITRD_SIZE + KERNEL_SIZE + GRUB_SIZE + 10*1024*1024) / 1024 / 1024 ))
+ESP_SIZE_MB=$(( (INITRD_SIZE + KERNEL_SIZE + 32*1024*1024) / 1024 / 1024 ))
 
 EFI_IMG="$BUILD_DIR/efi.img"
-dd if=/dev/zero of="$EFI_IMG" bs=1M count=$ESP_SIZE_MB 2>/dev/null
+dd if=/dev/zero of="$EFI_IMG" bs=1M count="$ESP_SIZE_MB" 2>/dev/null
 mformat -i "$EFI_IMG" -F ::
+
+# Boot loader
 mmd -i "$EFI_IMG" ::/EFI ::/EFI/BOOT
-mcopy -i "$EFI_IMG" "$BUILD_DIR/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
-mcopy -i "$EFI_IMG" "$KERNEL" ::/vmlinuz
+mcopy -i "$EFI_IMG" "$SDBOOT_EFI" ::/EFI/BOOT/BOOTX64.EFI
+
+# systemd-boot configuration (BLS)
+mmd -i "$EFI_IMG" ::/loader ::/loader/entries
+
+# loader.conf — timeout + default
+printf 'default knuckle\ntimeout 5\neditor no\n' \
+    | mcopy -i "$EFI_IMG" - ::/loader/loader.conf
+
+# Primary entry: dual console (VGA + serial)
+printf 'title   Knuckle \xe2\x80\x93 Install Flatcar Container Linux\nlinux   /vmlinuz\ninitrd  /initrd.img\noptions flatcar.autologin=tty1 console=tty0 console=ttyS0,115200n8 quiet\n' \
+    | mcopy -i "$EFI_IMG" - ::/loader/entries/knuckle.conf
+
+# Alternate entry: serial console only (headless servers)
+printf 'title   Knuckle \xe2\x80\x93 Install Flatcar (serial console)\nlinux   /vmlinuz\ninitrd  /initrd.img\noptions flatcar.autologin=ttyS0 console=ttyS0,115200n8\n' \
+    | mcopy -i "$EFI_IMG" - ::/loader/entries/knuckle-serial.conf
+
+# Kernel + initrd live inside the ESP (not duplicated in iso-root/)
+mcopy -i "$EFI_IMG" "$KERNEL"          ::/vmlinuz
 mcopy -i "$EFI_IMG" "$COMBINED_INITRD" ::/initrd.img
 
-echo "  ESP image: $(du -h "$EFI_IMG" | cut -f1)"
+echo "  ESP : $(du -h "$EFI_IMG" | cut -f1)"
 
-# 6. Assemble ISO with xorriso
-echo "[6/6] Assembling ISO..."
+# ── 5. Assemble ISO ───────────────────────────────────────────────────────────
+echo "[5/5] Assembling ISO..."
 
 ISO_DIR="$BUILD_DIR/iso-root"
 rm -rf "$ISO_DIR"
 mkdir -p "$ISO_DIR"
 
-# Put kernel+initrd on ISO (for reference/extraction)
-cp "$KERNEL" "$ISO_DIR/vmlinuz"
-cp "$COMBINED_INITRD" "$ISO_DIR/initrd.img"
-# EFI image INSIDE the ISO filesystem (required for CDROM UEFI boot)
+# Only the ESP image goes into iso-root/; kernel+initrd are inside the ESP.
 cp "$EFI_IMG" "$ISO_DIR/efi.img"
 
 mkdir -p "$OUTPUT_DIR"
@@ -175,11 +221,15 @@ xorriso -as mkisofs \
     "$ISO_DIR" 2>/dev/null
 
 echo ""
-echo "✅ ISO built: $ISO_OUT ($(du -h "$ISO_OUT" | cut -f1))"
+echo "ISO built: $ISO_OUT ($(du -h "$ISO_OUT" | cut -f1))"
 echo ""
-echo "Boot with QEMU:"
-echo "  qemu-system-x86_64 -m 4096 -enable-kvm -cdrom $ISO_OUT \\"
-echo "    -drive if=virtio,file=target.qcow2,format=qcow2 -nographic"
+echo "Test with QEMU (UEFI):"
+echo "  OVMF=/usr/share/OVMF/OVMF_CODE.fd"
+echo "  qemu-system-x86_64 -m 4096 -enable-kvm \\"
+echo "    -drive if=pflash,format=raw,readonly=on,file=\$OVMF \\"
+echo "    -cdrom $ISO_OUT \\"
+echo "    -drive if=virtio,file=target.qcow2,format=qcow2 \\"
+echo "    -nographic"
 echo ""
 echo "Write to USB:"
 echo "  sudo dd if=$ISO_OUT of=/dev/sdX bs=4M status=progress"

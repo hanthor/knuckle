@@ -25,12 +25,12 @@ jobs:
       - name: Install ISO dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xorriso mtools cpio grub-efi-amd64-bin grub2-common
+          sudo apt-get install -y xorriso mtools cpio systemd-boot-efi
 
       - name: Build installer ISO
         run: |
-          # build-iso.sh uses EFI shell fallback locally; here we patch it to use grub-mkstandalone
-          ./scripts/build-iso-ci.sh
+          chmod +x ./scripts/build-iso.sh
+          ./scripts/build-iso.sh --channel stable --binary ./knuckle
           cp output/knuckle-installer-stable.iso .
           sha256sum knuckle-installer-stable.iso > knuckle-installer-stable.iso.sha256
 

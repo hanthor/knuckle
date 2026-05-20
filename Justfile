@@ -232,7 +232,7 @@ e2e:
             -nographic" &
     echo "VM window opened. When done: just boot-target"
 
-# Build installer ISO (requires xorriso, mtools, cpio; GRUB optional)
+# Build installer ISO (requires xorriso, mtools, cpio, systemd-boot-efi)
 iso *CHANNEL='stable':
     ./scripts/build-iso.sh {{CHANNEL}}
 
@@ -245,11 +245,19 @@ boot-iso:
     just _kill-vm
     mkdir -p .vm
     [ -f .vm/target.qcow2 ] || qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
-    OVMF="/home/linuxbrew/.linuxbrew/Cellar/qemu/11.0.0/share/qemu/edk2-x86_64-code.fd"
-    [ -f "$OVMF" ] || { echo "OVMF not found at $OVMF"; exit 1; }
-    echo "Booting ISO (UEFI)..."
+    OVMF=""
+    for candidate in \
+        /usr/share/OVMF/OVMF_CODE.fd \
+        /usr/share/edk2/ovmf/OVMF_CODE.fd \
+        /home/linuxbrew/.linuxbrew/Cellar/qemu/*/share/qemu/edk2-x86_64-code.fd; do
+        # shellcheck disable=SC2086
+        for f in $candidate; do
+            [ -f "$f" ] && OVMF="$f" && break 2
+        done
+    done
+    [ -n "$OVMF" ] || { echo "OVMF not found — install ovmf package"; exit 1; }
+    echo "Booting ISO (UEFI, systemd-boot)..."
     echo "  → Ctrl-a x to quit QEMU"
-    echo "  → At EFI shell, type: fs0:\\startup.nsh"
     echo ""
     {{QEMU}} \
         -m 4096 -smp 2 -enable-kvm \
@@ -268,8 +276,17 @@ boot-iso-ssh:
     just _kill-vm
     mkdir -p .vm
     [ -f .vm/target.qcow2 ] || qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
-    OVMF="/home/linuxbrew/.linuxbrew/Cellar/qemu/11.0.0/share/qemu/edk2-x86_64-code.fd"
-    [ -f "$OVMF" ] || { echo "OVMF not found at $OVMF"; exit 1; }
+    OVMF=""
+    for candidate in \
+        /usr/share/OVMF/OVMF_CODE.fd \
+        /usr/share/edk2/ovmf/OVMF_CODE.fd \
+        /home/linuxbrew/.linuxbrew/Cellar/qemu/*/share/qemu/edk2-x86_64-code.fd; do
+        # shellcheck disable=SC2086
+        for f in $candidate; do
+            [ -f "$f" ] && OVMF="$f" && break 2
+        done
+    done
+    [ -n "$OVMF" ] || { echo "OVMF not found — install ovmf package"; exit 1; }
     {{QEMU}} \
         -m 4096 -smp 2 -enable-kvm \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
