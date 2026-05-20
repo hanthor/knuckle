@@ -18,6 +18,11 @@ Thumbs.db
 
 # Test artifacts
 coverage.out
+cover.out
+cover.html
+
+# Local tool binaries (pinned versions managed by just tools)
+.tools/
 
 # VM testing artifacts
 .vm/

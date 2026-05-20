@@ -300,7 +300,7 @@ func TestWriteIgnitionFileSecure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteIgnitionFile: %v", err)
 	}
-	defer os.Remove(path)
+	defer func() { _ = os.Remove(path) }()
 
 	// Verify file exists and has correct content
 	content, err := os.ReadFile(path)

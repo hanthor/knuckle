@@ -6,29 +6,55 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  build-test:
+    name: build + test (-race)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
+          check-latest: true
 
-      - name: Tidy
-        run: go mod tidy && git diff --exit-code go.mod
+      - name: go mod tidy (must be clean)
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
 
-      - name: Build
+      - name: gofmt (must be clean)
+        run: |
+          out=$(gofmt -l .)
+          if [[ -n "$out" ]]; then
+            echo "::error::these files are not gofmt-clean:"; echo "$out"; exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: build
         run: go build ./...
 
-      - name: Test
+      - name: test -race
         run: go test -race ./...
 
   lint:
+    name: golangci-lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@v6
         with:
@@ -37,3 +63,66 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.11.4
+
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: scan
+        run: $(go env GOPATH)/bin/govulncheck ./...
+
+  coverage:
+    name: coverage gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - uses: extractions/setup-just@v3
+
+      - name: per-package coverage thresholds
+        run: just cover-check
+
+      - name: aggregate coverage profile
+        run: go test -count=1 -covermode=atomic -coverprofile=cover.out ./...
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-profile
+          path: cover.out
+          retention-days: 14
+
+  headless-e2e:
+    name: headless e2e (dry-run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          check-latest: true
+
+      - uses: extractions/setup-just@v3
+
+      - name: headless dry-run
+        run: just headless-test

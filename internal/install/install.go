@@ -131,19 +131,19 @@ func (i *FlatcarInstaller) WriteIgnitionFile(ignitionJSON string) (string, error
 
 	// Set restrictive permissions (600) before writing sensitive content
 	if err := f.Chmod(0600); err != nil {
-		f.Close()
-		os.Remove(path)
+		_ = f.Close()
+		_ = os.Remove(path)
 		return "", fmt.Errorf("setting ignition file permissions: %w", err)
 	}
 
 	if _, err := f.WriteString(ignitionJSON); err != nil {
-		f.Close()
-		os.Remove(path)
+		_ = f.Close()
+		_ = os.Remove(path)
 		return "", fmt.Errorf("writing ignition content: %w", err)
 	}
 
 	if err := f.Close(); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", fmt.Errorf("closing ignition file: %w", err)
 	}
 

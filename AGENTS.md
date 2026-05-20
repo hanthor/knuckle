@@ -1,170 +1,281 @@
 # knuckle — Agent Context
 
+> **Audience:** AI coding agents (Claude Code, pi, Copilot, Cursor). Humans want
+> `README.md`. This file is the authoritative description of how to work in this
+> repo without breaking it.
+>
+> **Bar:** match CNCF-incubating rigor. Every change must keep `just ci` green,
+> respect the package boundaries, and preserve the safety invariants below.
+
+---
+
 ## What This Repo Is
 
-A modern TUI installer for Flatcar Container Linux, targeting bare-metal deployments.
-Built with Go and the charm.sh ecosystem (Bubble Tea, Lip Gloss, Huh).
+A modern TUI installer for [Flatcar Container Linux](https://www.flatcar.org/),
+targeting bare-metal deployments. Built in Go on the charm.sh stack (Bubble Tea
+v2, Lip Gloss v2, Huh v2). The wizard assembles an Ignition config and hands
+off to `flatcar-install` — knuckle never writes partitions itself.
 
-**Status:** Early development — scaffolding phase.
+- **Module:** `github.com/castrojo/knuckle` (Go 1.26+)
+- **License:** Apache-2.0
+- **Status:** feature-complete; all 12 packages pass `go test -race ./...`.
+- **Distribution:** `knuckle` binary + installer ISO produced from
+  `.github/workflows/release.yml` on `v*` tags.
 
 ## v1 Supported Scope
 
 - **Architecture:** x86_64 only (ARM64 is future work)
-- **Storage:** Single target disk (no RAID, LVM, or LUKS)
+- **Storage:** single target disk (no RAID, LVM, LUKS)
 - **Networking:** DHCP + simple static IPv4 only
-- **UI Language:** English only (no translated strings)
-- **Sysexts:** Official Flatcar Bakery entries only
-- **Config mode:** Guided local generation OR external Ignition URL — mutually exclusive
+- **UI Language:** English only
+- **Sysexts:** official Flatcar Bakery entries only (via GitHub Releases API)
+- **Config mode:** guided local generation OR external Ignition URL passthrough
+  (`Ctrl+A`) — mutually exclusive, no merging
+
+Anything outside this list belongs in an issue, not a PR.
+
+---
 
 ## Build / Test / Lint
 
 ```bash
-just ci        # full pipeline: tidy + lint + test-race + build
-just build     # compile binary to bin/knuckle
-just test      # go test ./...
-just test-race # go test -race ./...
-just lint      # golangci-lint run
-just fmt       # gofumpt
-just vuln      # govulncheck
-just run       # go run ./cmd/knuckle
+just              # list recipes
+just ci           # tidy + gofmt + vet + lint + vuln + test-race + cover-check + build
+just build        # GOOS=linux GOARCH=amd64 CGO_ENABLED=0 → bin/knuckle
+just test         # go test ./...
+just fmt          # gofmt -w .
+just fmt-check    # CI gate: fails if any file is not gofmt-clean
+just vuln         # govulncheck ./...  (auto-installs into $GOBIN)
+just cover        # statement coverage profile → cover.out, prints total
+just cover-check  # per-package coverage threshold gate
+just headless-test       # build + run a canned JSON config with --dry-run
+just vm                  # boot QEMU + run TUI over SSH (dry-run by default)
+just e2e                 # build ISO → boot in Ghostty → interactive install
 ```
 
-## Safety Rules
+`just ci` is the pre-push gate. CI re-runs every step in
+`.github/workflows/ci.yml` plus CodeQL / Scorecard / dependency-review in
+`.github/workflows/security.yml`. If CI fails, fix it — never `--no-verify`.
 
-- **Never run real `flatcar-install` on host.** Use `--dry-run` or QEMU/loopback for testing.
-- All system commands (lsblk, ip, flatcar-install) go through `internal/runner` — never `exec.Command` directly from TUI code.
-- Disk selection must use `/dev/disk/by-id` where possible; display model, serial, size, transport, removable flag.
-- **Never log to stdout** — Bubble Tea owns stdout. Use `log/slog` with a file handler.
+## Safety Invariants (do not violate)
+
+1. **Never run real `flatcar-install` on the host.** Use `--dry-run` or QEMU/
+   loopback. CI is always `--dry-run`.
+2. **All system commands route through `internal/runner`.** No
+   `exec.Command` outside `internal/runner` except `tea.ExecProcess` for the
+   post-install reboot in `internal/tui` (Bubble Tea pattern; documented in
+   `docs/REVIEW-2026-05-19.md` as a known seam to tighten).
+3. **Disk identity is `/dev/disk/by-id`.** Display model, serial, size,
+   transport, removable flag. Never trust `/dev/sdX` enumeration order.
+4. **Never log to stdout.** Bubble Tea owns it. Use `log/slog` with a file
+   handler (default `/tmp/knuckle.log`, override via `--log-file`).
+5. **Ignition contains secrets** (SSH keys, hashed passwords). Write it with
+   `os.CreateTemp` (O_EXCL), `chmod 0600`, defer `os.Remove`. Pattern in
+   `internal/install/install.go:WriteIgnitionFile`.
+
+---
 
 ## Package Boundaries
 
-| Package | Responsibility |
-|---|---|
-| `cmd/knuckle` | CLI entrypoint, flag parsing (`--dry-run`, `--log-file`, `--channel`) |
-| `internal/model` | Pure data types (InstallConfig, DiskSelection, NetworkConfig, etc.) — zero deps |
-| `internal/wizard` | Step flow state machine, navigation logic, validation gates |
-| `internal/tui` | Bubble Tea view models, rendering (one sub-model per step) |
-| `internal/probe` | System probing (disks via lsblk, network via ip link, hardware) |
-| `internal/runner` | exec.Command wrapper, `--dry-run` support, output capture, test spy |
-| `internal/bakery` | HTTP client for Flatcar Bakery sysext catalog |
-| `internal/ignition` | Butane config assembly (Flatcar variant), Ignition compilation |
-| `internal/install` | flatcar-install orchestration via runner |
-| `internal/validate` | Input validation, config consistency checks |
+| Package           | Responsibility                                                     | Coverage |
+| ----------------- | ------------------------------------------------------------------ | -------- |
+| `cmd/knuckle`     | CLI entrypoint, flag parsing, runner wiring                        | n/a      |
+| `internal/model`  | Pure data types — `InstallConfig`, `DiskInfo`, `NetworkInterface`  | 100%     |
+| `internal/runner` | `Runner` interface: `RealRunner`, `DryRunner`, `SpyRunner`         | 81%      |
+| `internal/probe`  | `lsblk` + `ip addr` JSON parsing, `/dev/disk/by-id` resolution     | 81%      |
+| `internal/validate` | Hostname, CIDR, gateway, SSH key, timezone, disk path validators | 88%      |
+| `internal/bakery` | sysext catalog + Flatcar release/SBOM fetchers, SHA512 check       | 84%      |
+| `internal/github` | SSH key fetch + GitHub Releases API client                         | 90%      |
+| `internal/ignition` | Butane assembly + in-process Butane→Ignition compilation         | 92%      |
+| `internal/install` | `flatcar-install` orchestration via runner                        | 76%      |
+| `internal/iso`    | Installer ISO builder helpers                                      | 100%     |
+| `internal/headless` | `--headless --config` JSON-driven install path                   | 75%      |
+| `internal/wizard` | Step state machine, navigation, validation gates                   | 80%      |
+| `internal/tui`    | Bubble Tea view models (one sub-model per step), forms             | 46%      |
 
-## Dependency Graph (no cycles allowed)
+Targets enforced by `just cover-check` are deliberately set ≤ current numbers
+so the gate guards against *regression*. Long-term aspirations live in
+`docs/CI-AND-TESTING.md` — raise the gate as coverage rises.
+
+### Dependency Graph (acyclic; enforced by import structure)
 
 ```
-model ← (leaf, zero imports — everyone depends on it)
-runner ← probe, install (injected via interface)
-validate ← tui (field-level), ignition (final check)
-probe ← wizard/tui (provides disk/network data)
-bakery ← wizard/tui (provides sysext catalog)
+model    ← leaf, zero internal imports — everything depends on it
+runner   ← probe, install, headless (injected via interface)
+validate ← tui (field-level), ignition (final check), headless
+probe    ← wizard/tui (disk + network data)
+bakery   ← wizard/tui (sysext catalog + channel info)
+github   ← wizard (SSH key fetch)
 ignition ← install, wizard
-install ← wizard
-wizard ← tui, cmd/knuckle
-tui ← cmd/knuckle
+install  ← wizard, headless
+headless ← cmd/knuckle
+wizard   ← tui, cmd/knuckle
+tui      ← cmd/knuckle
 ```
+
+`go vet ./...` runs in CI; cycle violations break the build.
+
+---
 
 ## Architecture Decisions
 
-1. **Runner abstraction** — All external commands go through `internal/runner`. This enables dry-run mode, test fixtures, and safe CI.
-2. **Flatcar Butane variant** — Use `variant: flatcar` (not generic CoreOS) when generating Butane configs. Import via `github.com/coreos/butane` v0.27+ (Flatcar variant, Ignition spec 3.6.0). Compiled in-process via `ignition.CompileToIgnition()` — no CLI binary needed.
-3. **Mutually exclusive config modes** — v1 supports either guided local generation OR external Ignition URL passthrough (Ctrl+A advanced toggle). No merge logic.
-4. **Disk identity** — Use `/dev/disk/by-id` paths. Never rely on `/dev/sda` ordering.
-5. **TUI ↔ logic separation** — `internal/tui` renders views; `internal/wizard` manages state transitions. No business logic in view models.
-6. **Shared data model** — `internal/model` owns all data types. Wizard builds them, TUI reads/writes fields, ignition consumes them, validate checks them.
-7. **huh.Form for form steps** — Welcome, Network, User, Review use `charmbracelet/huh` with Dracula theme. Storage, Sysext, Update, Install, Done use raw Bubble Tea. Validation via `.Validate()` callbacks. Multi-group forms for wizard paging.
-8. **Supply chain verification** — SBOM JSON (SPDX) is primary source for package versions. SHA512 digest verification against `.DIGESTS` file. GPG-signed digest presence check. Visual indicators (🔒/🔓/⚠️) in TUI.
+1. **Runner abstraction.** Every external command goes through
+   `internal/runner.Runner`. Three implementations: `RealRunner` (prod),
+   `DryRunner` (no-op + structured logging), `SpyRunner` (test recorder).
+2. **Flatcar Butane variant.** `variant: flatcar` (not generic CoreOS),
+   compiled in-process via `github.com/coreos/butane` v0.27+ →
+   `ignition.CompileToIgnition()`. No `butane` CLI on the target system.
+   Rationale: `docs/BUTANE-DEPENDENCY.md`.
+3. **Mutually exclusive config modes.** Guided OR external Ignition URL
+   (`Ctrl+A`). No merge logic.
+4. **Disk identity via `/dev/disk/by-id`.** Falls back to raw device path only
+   when `/dev/disk/by-id/` is absent (CI containers). See
+   `internal/probe/probe.go:resolveByIDPath`.
+5. **TUI ↔ logic separation.** `internal/tui` renders; `internal/wizard`
+   transitions. No business logic in view models.
+6. **Shared data model.** `internal/model` owns every cross-package type.
+   Wizard builds them, TUI reads/writes fields, ignition consumes, validate
+   checks.
+7. **huh.Form for form steps.** Welcome, Network, User, Review use
+   `charmbracelet/huh` with the Dracula theme. Storage, Sysext, Update,
+   Install, Done are raw Bubble Tea. Validation via `.Validate()` callbacks.
+8. **Supply-chain signals (display-only today).** SBOM JSON (SPDX) is the
+   primary version source. SHA512 against `.DIGESTS` is verified for the
+   Flatcar SBOM and surfaced in the channel screen. GPG-signed digest
+   *presence* is checked; full GPG verification is on the roadmap (tracked in
+   `docs/SECURITY.md`).
+9. **Headless mode mirrors the TUI.** `--headless --config <file.json>` drives
+   `internal/headless` through the same `internal/install` path. New TUI
+   fields must round-trip through the headless config schema.
 
-## Testing Strategy
+---
 
-- Unit tests with fixture data in `testdata/`
-- Table-driven tests for `validate`, `probe`, `bakery`
-- Golden file tests for `ignition` (with `-update` flag)
-- Runner abstraction allows testing install/probe logic without real hardware
-- Integration tests gated behind `//go:build integration`
-- No real disk writes in CI — `--dry-run` is default in test mode
-- Coverage targets: ≥80% for validate/ignition/probe/runner, ≥70% for bakery/install, ≥60% for wizard
+## Test Pyramid
 
-## Agent Workflow — Required Skills
+| Layer        | Where                                  | What                                                |
+| ------------ | -------------------------------------- | --------------------------------------------------- |
+| Unit         | `internal/**/_test.go`                 | Pure logic, fixture-driven                          |
+| Golden       | `internal/ignition/testdata/`          | Butane → Ignition output diffs (`-update` rewrites) |
+| Integration  | `//go:build integration` (not in CI)   | Real network: GitHub API, Flatcar release server    |
+| Headless e2e | `just headless-test`                   | Build + canned JSON config + `--dry-run`            |
+| VM e2e       | `just vm`, `just e2e`                  | QEMU boot, TUI over SSH, ISO build/boot             |
 
-When an agent works on this repo, load these skills in order:
+CI today runs unit + race + lint + vuln + coverage gate. Integration and VM
+e2e are local-dev. See `docs/CI-AND-TESTING.md` for the matrix and roadmap.
 
-### Always Load (every session)
-```
-cat ~/src/skills/workflow/SKILL.md          # session lifecycle, scope declaration
-cat ~/src/skills/github-issues/SKILL.md     # issue triage, labels, closure protocol
-```
+---
 
-### Load By Task Type
+## Working in this repo as an agent
 
-| Task | Skills to Load |
-|---|---|
-| Implementing a feature issue | `workflow` + `github-issues` |
-| Writing or updating tests | `workflow` + TDD skills (`tdd-red`, `tdd-green`, `tdd-refactor`) |
-| CI/CD changes (`.github/workflows/`) | `workflow` + `github-actions-expert` |
-| Multi-file architecture work | `workflow` + `blueprint-mode` + `subagent-discipline` |
-| Code review | `workflow` + `receiving-code-review` or `requesting-code-review` |
-| Debugging a failing test | `workflow` + `systematic-debugging` |
-| Release / binary distribution | `workflow` + `git-pr-workflow` |
-| Security review (disk/network handling) | `workflow` + `se-security-reviewer` |
+### Claude Code
 
-### Agent Dispatch Patterns
+**Role in this repo:** Claude Code (Sonnet 4.6+) is the designated final
+principal-engineer review agent. Before any release tag, run the PE checklist
+below using Claude Code with the slm MCP wired — it has full cross-session
+context of every prior review finding.
 
-| Agent Type | When to Use |
-|---|---|
-| **SWE** (`swe-subagent`) | Implementing a single issue (feature, bugfix) |
-| **TDD Red** | Writing failing tests for a new feature before implementation |
-| **TDD Green** | Making tests pass with minimal code |
-| **TDD Refactor** | Cleaning up after green phase |
-| **QA** | Test plan review, edge case analysis, bug hunting |
-| **Principal SE** | Architecture decisions, package boundary questions |
-| **Rubber Duck** | Plan critique before implementation, blind spot detection |
-| **Security Reviewer** | Any code touching disk writes, network config, or credential handling |
-| **GitHub Actions Expert** | CI workflow authoring, ISO builder pipeline |
+**Memory (slm) wiring — one-time setup:**
 
-### Implementation Workflow (per issue)
-
-```
-1. Load workflow + relevant domain skill
-2. Read the issue body + any enrichment comments
-3. Create feature branch: feat/<issue-slug>
-4. Implement with TDD: red → green → refactor
-5. Run `just ci` — must pass
-6. Commit with conventional commit: feat|fix|refactor|test: <description>
-7. Push to origin, report compare URL
-8. Close issue with evidence (command + output)
+```bash
+claude mcp add slm -s user -- podman exec -i systemd-superlocalmemory-slm slm mcp
+# restart Claude Code — mcp__slm__* tools will surface in the session
 ```
 
-### Conventional Commit Types
+**Verification:** ask Claude Code to `mcp__slm__get_status` — expect
+`fact_count > 800`, `mode: "a"`. If absent or count is 0, memory is not wired.
+
+When slm is wired, use `mcp__slm__recall(query=...)` — 4-channel retrieval
+(semantic + spreading-activation + BM25 + temporal) vs FTS5-only search.
+Bootstrap queries to run at session start:
 
 ```
-feat:     New feature or capability
-fix:      Bug fix
-test:     Adding or updating tests
-refactor: Code restructuring (no behavior change)
-docs:     Documentation updates
-ci:       CI/CD workflow changes
-chore:    Maintenance (deps, tooling)
+recall("correction violation preference constraint workflow rule", limit=10)
+recall("knuckle workflow patterns constraints project", limit=8)
+recall("knuckle <task-description>", limit=5)
 ```
 
-### Key Rules for This Repo
+**If memory is absent:** say so and proceed. This repo does not block on it.
+The full bootstrap from `~/src/AGENTS.md` is for the pi agent only.
 
-1. **Issue-first** — Every PR must reference an issue number
-2. **Branch-per-feature** — One branch per issue, named `feat/<slug>` or `fix/<slug>`
-3. **`just ci` gate** — Must pass before any push
-4. **No real installs** — `--dry-run` in all tests and local dev
-5. **Golden files** — Run `go test ./internal/ignition -update` when Ignition output intentionally changes
-6. **Fixture-driven** — Probe tests use committed JSON fixtures in `testdata/`, never live system calls
-7. **Interfaces for injection** — Runner, Prober, BakeryClient, Installer all defined as interfaces
-8. **Co-authored-by trailer** — All agent commits include `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`
+**Tool pins:** golangci-lint and govulncheck versions are pinned in the
+Justfile (`GOLANGCI_LINT_VERSION`) and go.mod (`tool` directive). When
+bumping a tool version: update both places and commit go.mod + go.sum.
+
+```bash
+just tools          # install / verify pinned tool binaries
+just ci             # full pre-push gate (now includes headless e2e)
+```
+
+### All agents
+
+1. **Read this file, then the issue.** Don't infer scope from a commit subject.
+2. **Declare SCOPE / GOAL / OUT OF SCOPE** before editing.
+3. **One PR per issue.** Branch `feat/<slug>` or `fix/<slug>`. Conventional
+   commits (`feat:`, `fix:`, `test:`, `refactor:`, `docs:`, `ci:`, `chore:`).
+4. **`just ci` is the gate.** If it fails, fix it; don't push.
+5. **Push to `origin` (castrojo/knuckle) only.** No upstream pushes from
+   automation.
+6. **Touch `.github/workflows/*.yml`?** Coordinate via PR description — these
+   are security-sensitive. CodeQL + Scorecard run on every push.
+7. **Adding a new external command?** Wire it through `runner.Runner`. Period.
+8. **Adding a new disk-touching code path?** Default behavior under `--dry-run`
+   must be a no-op. Add a `DryRunner` stub assertion in tests.
+
+### Subagent dispatch
+
+| Agent          | Use it for                                                      |
+| -------------- | --------------------------------------------------------------- |
+| `Explore`      | "where is X defined", broad code search                         |
+| `Plan`         | Multi-file changes, architectural decisions                     |
+| `QA`           | Edge-case enumeration, fixture gaps, test-pyramid review        |
+| `Principal SE` | Pre-release architecture audit, blocker classification          |
+| `Security`     | Any change touching disk writes, network, credentials, ignition |
+
+Don't dispatch a subagent for single-file edits or single grep queries — do
+those inline.
+
+---
+
+## Principal-Engineer Review Checklist
+
+Run this before tagging any release. Anything red blocks the tag.
+
+```bash
+# One command to run them all — must be green on a clean checkout
+just tools && just ci
+```
+
+Individual gates (all exercised by `just ci`):
+
+- [ ] `go mod tidy && git diff --exit-code go.mod go.sum` — module graph clean
+- [ ] `gofmt -l .` empty
+- [ ] `go vet ./...` clean
+- [ ] `.tools/golangci-lint run ./...` clean
+- [ ] `go tool govulncheck ./...` — `No vulnerabilities found.`
+- [ ] `go test -race ./...` — all 12 packages green
+- [ ] `just cover-check` — all packages above gate thresholds
+- [ ] `just headless-test` — dry-run end-to-end passes
+- [ ] `just build` — binary compiles
+- [ ] `git status` clean — no untracked files in repo
+- [ ] `grep -rn 'exec\.Command' --include='*.go' --exclude-dir=internal/runner .`
+      → only documented seams (`tui.go` reboot via `tea.ExecProcess`,
+      `cmd/knuckle/main.go` reboot guard) — tracked as blocker B2
+- [ ] All claims in `README.md` still true
+- [ ] `docs/REVIEW-*.md` reconciled — every blocker fixed or deferred with issue
+
+**Open blockers (must fix before 1.0):** B1 (GPG not verified), B2 (reboot
+bypasses runner), B3 (headless disk path not validated). See `docs/REVIEW-2026-05-19.md`.
+
+The most recent review record is `docs/REVIEW-2026-05-19.md`.
+
+---
 
 ## Reference
 
 - [Flatcar Container Linux](https://www.flatcar.org/)
 - [Flatcar Bakery (sysexts)](https://www.flatcar.org/docs/latest/provisioning/sysext/)
 - [Butane / Ignition](https://coreos.github.io/butane/config-flatcar-v1_1/)
-- [charm.sh ecosystem](https://charm.sh)
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea)
-- [Huh (forms)](https://github.com/charmbracelet/huh)
+- [charm.sh](https://charm.sh) — Bubble Tea, Lip Gloss, Huh, Bubbles
 - [flatcar-install](https://www.flatcar.org/docs/latest/installing/bare-metal/installing-to-disk/)
+- [OSSF Scorecard](https://github.com/ossf/scorecard) — runs weekly in `security.yml`
+- [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) — runs every PR

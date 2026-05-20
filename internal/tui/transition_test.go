@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/castrojo/knuckle/internal/model"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // TestStorageToUserTransition verifies that advancing from Storage (non-form)
@@ -67,9 +67,9 @@ func TestFormStepTransitionsAlwaysInitForm(t *testing.T) {
 		from model.WizardStep
 		to   model.WizardStep
 	}{
-		{model.StepStorage, model.StepUser},   // Storage → User
-		{model.StepSysext, model.StepUpdate},  // Sysext → Update (non-form → non-form, control)
-		{model.StepUpdate, model.StepReview},  // Update → Review (non-form → form)
+		{model.StepStorage, model.StepUser},  // Storage → User
+		{model.StepSysext, model.StepUpdate}, // Sysext → Update (non-form → non-form, control)
+		{model.StepUpdate, model.StepReview}, // Update → Review (non-form → form)
 	}
 
 	for _, tt := range transitions {

@@ -44,9 +44,9 @@ func TestClient_FetchKeys_WithTestServer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/testuser.keys":
-			fmt.Fprintln(w, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest testuser@github")
+			_, _ = fmt.Fprintln(w, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest testuser@github")
 		case "/nokeys.keys":
-			fmt.Fprintln(w, "")
+			_, _ = fmt.Fprintln(w, "")
 		case "/gone.keys":
 			w.WriteHeader(404)
 		default:

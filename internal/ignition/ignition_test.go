@@ -375,24 +375,24 @@ func TestGenerateButanePasswordAuthNo(t *testing.T) {
 }
 
 func TestGenerateButaneDefaultChannel(t *testing.T) {
-g := NewGenerator()
-cfg := &model.InstallConfig{
-Hostname: "default-channel-node",
-Channel:  "", // empty — should default to "stable"
-Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
-Users: []model.UserConfig{
-{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA test"}},
-},
-}
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "default-channel-node",
+		Channel:  "", // empty — should default to "stable"
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users: []model.UserConfig{
+			{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA test"}},
+		},
+	}
 
-output, err := g.GenerateButane(cfg)
-if err != nil {
-t.Fatalf("unexpected error: %v", err)
-}
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-if !strings.Contains(output, "GROUP=stable") {
-t.Errorf("expected GROUP=stable when channel is empty, got output:\n%s", output)
-}
+	if !strings.Contains(output, "GROUP=stable") {
+		t.Errorf("expected GROUP=stable when channel is empty, got output:\n%s", output)
+	}
 }
 
 func TestGenerateButaneTimezoneAndSysexts(t *testing.T) {

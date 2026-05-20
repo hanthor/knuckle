@@ -23,8 +23,6 @@ import (
 )
 
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).MarginBottom(1)
-	stepStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("170")).Bold(true)
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).MarginTop(1)
@@ -44,19 +42,19 @@ type fetchKeysMsg struct {
 
 // Model is the top-level Bubble Tea model
 type Model struct {
-	Wizard      *wizard.Wizard
-	width       int
-	height      int
-	err         error
-	quitting    bool
-	confirmQuit bool
+	Wizard        *wizard.Wizard
+	width         int
+	height        int
+	err           error
+	quitting      bool
+	confirmQuit   bool
 	confirmReboot bool
-	showButane  bool
-	installing  bool
-	fetching    bool
-	cursor      int
-	fields      []field
-	fieldIdx    int
+	showButane    bool
+	installing    bool
+	fetching      bool
+	cursor        int
+	fields        []field
+	fieldIdx      int
 
 	// huh form state
 	activeForm       *huh.Form
@@ -662,77 +660,6 @@ func (m *Model) View() string {
 	return b.String()
 }
 
-func (m *Model) viewWelcome() string {
-	var b strings.Builder
-	b.WriteString(`Welcome to Knuckle!
-
-This wizard will guide you through installing Flatcar Container Linux
-on your system.
-
-What this installer will do:
-  • Detect your hardware (disks, network)
-  • Configure networking (DHCP or static)
-  • Set up user accounts and SSH keys
-  • Optionally add system extensions
-  • Write Flatcar to your selected disk
-
-`)
-	// Show system checks
-	if len(m.Wizard.State.SystemChecks) > 0 {
-		b.WriteString("System checks:\n")
-		for _, check := range m.Wizard.State.SystemChecks {
-			icon := "✓"
-			if check.Status == "warn" {
-				icon = "⚠"
-			} else if check.Status == "fail" {
-				icon = "✗"
-			}
-			fmt.Fprintf(&b, "  %s %s: %s\n", icon, check.Name, check.Detail)
-		}
-		b.WriteString("\n")
-	}
-	// Show channel version info if available
-	if len(m.Wizard.State.Channels) > 0 {
-		b.WriteString("Available channels:\n")
-		for _, ch := range m.Wizard.State.Channels {
-			fmt.Fprintf(&b, "  %s — Flatcar %s\n", ch.Channel, ch.Version)
-			fmt.Fprintf(&b, "    kernel %s · systemd %s · docker %s · containerd %s\n",
-				ch.Kernel, ch.Systemd, ch.Docker, ch.Containerd)
-		}
-		b.WriteString("\n")
-	}
-	for i, f := range m.fields {
-		cursor := "  "
-		if i == m.fieldIdx {
-			cursor = "▸ "
-		}
-		fmt.Fprintf(&b, "%s%s: %s\n", cursor, f.label, f.value)
-	}
-	b.WriteString("\nPress Enter to continue...")
-	return b.String()
-}
-
-func (m *Model) viewNetwork() string {
-	var b strings.Builder
-	b.WriteString("Network Configuration\n\n")
-	if len(m.Wizard.State.Interfaces) > 0 {
-		b.WriteString("Detected interfaces:\n")
-		for _, iface := range m.Wizard.State.Interfaces {
-			fmt.Fprintf(&b, "  • %s (%s) — %s\n", iface.Name, iface.MAC, iface.State)
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString("Using DHCP by default. Fill in fields for static config:\n\n")
-	for i, f := range m.fields {
-		cursor := "  "
-		if i == m.fieldIdx {
-			cursor = "▸ "
-		}
-		fmt.Fprintf(&b, "%s%s: %s\n", cursor, f.label, f.value)
-	}
-	return b.String()
-}
-
 func (m *Model) viewStorage() string {
 	var b strings.Builder
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
@@ -784,29 +711,6 @@ func (m *Model) viewStorage() string {
 	}
 	b.WriteString(warnStyle.Render("⚠ All data on the selected disk will be erased!"))
 	b.WriteString("\n")
-	return b.String()
-}
-
-func (m *Model) viewUser() string {
-	var b strings.Builder
-	b.WriteString("User Configuration\n\n")
-	b.WriteString("Enter a GitHub username to auto-fetch your SSH keys,\nor paste a key manually.\n\n")
-	for i, f := range m.fields {
-		cursor := "  "
-		if i == m.fieldIdx {
-			cursor = "▸ "
-		}
-		displayVal := f.value
-		if f.masked && f.value != "" {
-			displayVal = strings.Repeat("•", len(f.value))
-		}
-		fmt.Fprintf(&b, "%s%s: %s\n", cursor, f.label, displayVal)
-	}
-	if m.fetching {
-		b.WriteString("\n  ⠋ Fetching SSH keys from GitHub...\n")
-	} else if len(m.Wizard.State.Config.SSHKeys) > 0 {
-		fmt.Fprintf(&b, "\n  ✓ %d SSH key(s) configured\n", len(m.Wizard.State.Config.SSHKeys))
-	}
 	return b.String()
 }
 
@@ -875,92 +779,9 @@ func (m *Model) viewUpdate() string {
 		}
 		b.WriteString("\n")
 		for _, d := range opt.desc {
-			b.WriteString(fmt.Sprintf("    %s\n", d))
+			fmt.Fprintf(&b, "    %s\n", d)
 		}
 		b.WriteString("\n")
-	}
-	return b.String()
-}
-
-func (m *Model) viewReview() string {
-	var b strings.Builder
-	cfg := m.Wizard.State.Config
-	b.WriteString("Review Configuration\n\n")
-
-	if cfg.IgnitionURL != "" {
-		fmt.Fprintf(&b, "  Mode:      External Ignition\n")
-		fmt.Fprintf(&b, "  URL:       %s\n", cfg.IgnitionURL)
-		fmt.Fprintf(&b, "  Disk:      %s (%s)\n", cfg.Disk.DevPath, cfg.Disk.SizeHuman)
-	} else {
-		fmt.Fprintf(&b, "  Channel:   %s\n", cfg.Channel)
-		if cfg.Version != "" {
-			fmt.Fprintf(&b, "  Version:   %s\n", cfg.Version)
-		}
-		fmt.Fprintf(&b, "  Hostname:  %s\n", cfg.Hostname)
-		if cfg.Timezone != "" {
-			fmt.Fprintf(&b, "  Timezone:  %s\n", cfg.Timezone)
-		}
-		fmt.Fprintf(&b, "  Disk:      %s (%s)\n", cfg.Disk.DevPath, cfg.Disk.SizeHuman)
-		fmt.Fprintf(&b, "  Network:   %s\n", cfg.Network.Mode.String())
-		if cfg.Network.Mode == model.NetworkStatic {
-			fmt.Fprintf(&b, "  Address:   %s\n", cfg.Network.Address)
-			fmt.Fprintf(&b, "  Gateway:   %s\n", cfg.Network.Gateway)
-		}
-		if len(cfg.Users) > 0 {
-			fmt.Fprintf(&b, "  User:      %s\n", cfg.Users[0].Username)
-			if cfg.Users[0].PasswordHash != "" {
-				fmt.Fprintf(&b, "  Password:  ✓ set\n")
-			}
-		}
-		if len(cfg.SSHKeys) > 0 {
-			fmt.Fprintf(&b, "  SSH Keys:  %d configured\n", len(cfg.SSHKeys))
-		}
-		selected := 0
-		for _, s := range cfg.Sysexts {
-			if s.Selected {
-				selected++
-			}
-		}
-		if selected > 0 {
-			fmt.Fprintf(&b, "  Sysexts:   %d selected\n", selected)
-		}
-		if cfg.UpdateStrategy.RebootStrategy != "" {
-			fmt.Fprintf(&b, "  Update:    %s\n", cfg.UpdateStrategy.RebootStrategy)
-		}
-
-		// Butane preview
-		if m.showButane {
-			b.WriteString("\n─── Butane YAML Preview ───\n")
-			butane, err := m.Wizard.GenerateButane()
-			if err != nil {
-				fmt.Fprintf(&b, "  Error: %v\n", err)
-			} else {
-				// Show first 30 lines
-				lines := strings.Split(butane, "\n")
-				max := 30
-				if len(lines) < max {
-					max = len(lines)
-				}
-				for _, line := range lines[:max] {
-					fmt.Fprintf(&b, "  %s\n", line)
-				}
-				if len(lines) > max {
-					fmt.Fprintf(&b, "  ... (%d more lines)\n", len(lines)-max)
-				}
-			}
-			b.WriteString("───────────────────────────\n")
-		} else {
-			b.WriteString("\n  Press Ctrl+B to preview Butane YAML\n")
-		}
-	}
-
-	b.WriteString("\n⚠ ALL DATA ON " + cfg.Disk.DevPath + " WILL BE DESTROYED!\n\n")
-	for i, f := range m.fields {
-		cursor := "  "
-		if i == m.fieldIdx {
-			cursor = "▸ "
-		}
-		fmt.Fprintf(&b, "%s%s: %s\n", cursor, f.label, f.value)
 	}
 	return b.String()
 }
@@ -978,7 +799,7 @@ func (m *Model) viewInstall() string {
 
 	// Current phase with spinner + progress bar
 	if m.installing {
-		b.WriteString(fmt.Sprintf("  %s Working...\n", m.spinner.View()))
+		fmt.Fprintf(&b, "  %s Working...\n", m.spinner.View())
 		b.WriteString("\n  " + m.progress.View() + "\n")
 	}
 

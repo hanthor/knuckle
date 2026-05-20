@@ -19,18 +19,18 @@ import (
 // Config is the JSON schema for headless install configuration.
 // It maps closely to model.InstallConfig but uses simpler types for JSON.
 type Config struct {
-	Channel        string         `json:"channel"`
-	Version        string         `json:"version,omitempty"`
-	Hostname       string         `json:"hostname"`
-	Timezone       string         `json:"timezone,omitempty"`
-	Network        NetworkConfig  `json:"network"`
-	Users          []UserConfig   `json:"users"`
-	Disk           string         `json:"disk"`
-	Sysexts        []string       `json:"sysexts,omitempty"`
-	UpdateStrategy string         `json:"update_strategy"`
-	IgnitionURL    string         `json:"ignition_url,omitempty"`
-	Reboot         bool           `json:"reboot"`
-	DryRun         bool           `json:"dry_run,omitempty"`
+	Channel        string        `json:"channel"`
+	Version        string        `json:"version,omitempty"`
+	Hostname       string        `json:"hostname"`
+	Timezone       string        `json:"timezone,omitempty"`
+	Network        NetworkConfig `json:"network"`
+	Users          []UserConfig  `json:"users"`
+	Disk           string        `json:"disk"`
+	Sysexts        []string      `json:"sysexts,omitempty"`
+	UpdateStrategy string        `json:"update_strategy"`
+	IgnitionURL    string        `json:"ignition_url,omitempty"`
+	Reboot         bool          `json:"reboot"`
+	DryRun         bool          `json:"dry_run,omitempty"`
 }
 
 // NetworkConfig for JSON input.

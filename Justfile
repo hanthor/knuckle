@@ -20,12 +20,84 @@ build:
 test:
     go test ./...
 
-# Full CI (lint + test + build)
-ci:
+# Tool versions — bump here and in .github/workflows/ci.yml together
+GOLANGCI_LINT_VERSION := "2.11.4"
+GOLANGCI_LINT := ".tools/golangci-lint"
+
+# Install pinned tool binaries (idempotent — run once after clone, or after version bump)
+tools:
+    just _install-golangci-lint
+    go tool govulncheck -version
+    @echo "tools ok"
+
+# Full CI (tidy + fmt-check + vet + lint + vuln + test-race + cover-check + headless-e2e + build)
+ci: _install-golangci-lint
     go mod tidy
-    golangci-lint run ./...
+    @git diff --exit-code go.mod go.sum || (echo "go.mod/go.sum dirty after tidy" && exit 1)
+    just fmt-check
+    go vet ./...
+    {{GOLANGCI_LINT}} run ./...
+    go tool govulncheck ./...
     go test -race ./...
+    just cover-check
+    just headless-test
     just build
+
+# Check formatting (CI gate — fails if any file would change)
+fmt-check:
+    #!/usr/bin/env bash
+    out=$(gofmt -l . 2>&1)
+    if [[ -n "$out" ]]; then
+        echo "gofmt would change these files:"; echo "$out"; exit 1
+    fi
+
+# Format all Go files in place
+fmt:
+    gofmt -w .
+
+# Vulnerability scan — version pinned in go.mod via `go tool`
+vuln:
+    go tool govulncheck ./...
+
+# Coverage report (text + cover.out for tooling)
+cover:
+    go test -count=1 -race -covermode=atomic -coverprofile=cover.out ./...
+    @go tool cover -func=cover.out | tail -1
+
+# Coverage HTML — open cover.html in browser to inspect uncovered lines
+cover-html: cover
+    go tool cover -html=cover.out -o cover.html
+    @echo "open cover.html"
+
+# Per-package coverage gate. Mirrors docs/CI-AND-TESTING.md targets.
+# Exits non-zero if any package falls below its threshold.
+# Uses statement-count coverage from `go test -cover`, not function-average.
+cover-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    declare -A targets=(
+        [model]=90  [validate]=85  [ignition]=85  [github]=85
+        [bakery]=80 [probe]=80     [runner]=80    [install]=70
+        [headless]=70 [wizard]=70  [iso]=70       [tui]=40
+    )
+    fail=0
+    for pkg in "${!targets[@]}"; do
+        pct=$(go test -count=1 -cover ./internal/${pkg}/... 2>/dev/null \
+            | awk '/coverage:/ {gsub("%",""); print $(NF-2); exit}')
+        pct=${pct%.*}
+        if [[ -z "$pct" ]]; then
+            echo "FAIL  internal/${pkg}   no coverage reported"
+            fail=1
+            continue
+        fi
+        if (( pct < ${targets[$pkg]} )); then
+            echo "FAIL  internal/${pkg}  ${pct}%  (target ${targets[$pkg]}%)"
+            fail=1
+        else
+            echo "ok    internal/${pkg}  ${pct}%  (target ${targets[$pkg]}%)"
+        fi
+    done
+    exit $fail
 
 # Quick headless dry-run test (no VM needed)
 headless-test:
@@ -224,6 +296,27 @@ clean:
     rm -rf bin/ .vm/
 
 # --- Internal helpers (not listed) ---
+
+[private]
+_install-golangci-lint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -x "{{GOLANGCI_LINT}}" ]]; then
+        ver=$("{{GOLANGCI_LINT}}" --version 2>&1 | grep -oP 'version \K[0-9.]+' || true)
+        [[ "$ver" == "{{GOLANGCI_LINT_VERSION}}" ]] && exit 0
+        echo "golangci-lint version mismatch (got $ver, want {{GOLANGCI_LINT_VERSION}}) — reinstalling"
+    fi
+    mkdir -p .tools
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+    ARCHIVE="golangci-lint-{{GOLANGCI_LINT_VERSION}}-${OS}-${ARCH}.tar.gz"
+    URL="https://github.com/golangci/golangci-lint/releases/download/v{{GOLANGCI_LINT_VERSION}}/$ARCHIVE"
+    echo "Downloading golangci-lint v{{GOLANGCI_LINT_VERSION}}..."
+    curl -sSfL "$URL" | tar -xzf - -C .tools \
+        --strip-components=1 \
+        "golangci-lint-{{GOLANGCI_LINT_VERSION}}-${OS}-${ARCH}/golangci-lint"
+    chmod +x "{{GOLANGCI_LINT}}"
+    echo "golangci-lint v{{GOLANGCI_LINT_VERSION}} installed to {{GOLANGCI_LINT}}"
 
 [private]
 _ensure-base:

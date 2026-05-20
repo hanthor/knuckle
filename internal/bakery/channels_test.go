@@ -260,7 +260,7 @@ func TestVerificationStatusInChannelInfo(t *testing.T) {
 	mux.HandleFunc("/flatcar_production_image_sbom.json.DIGESTS", func(w http.ResponseWriter, r *http.Request) {
 		// Compute real SHA512 of the SBOM content
 		hash := sha512Hash(sbomContent)
-		fmt.Fprintf(w, "# SHA512 HASH\n%s  flatcar_production_image_sbom.json\n", hash)
+		_, _ = fmt.Fprintf(w, "# SHA512 HASH\n%s  flatcar_production_image_sbom.json\n", hash)
 	})
 	mux.HandleFunc("/flatcar_production_image_sbom.json.DIGESTS.asc", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("-----BEGIN PGP SIGNED MESSAGE-----\nfake\n"))

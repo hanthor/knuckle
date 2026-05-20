@@ -11,52 +11,6 @@ import (
 	"github.com/castrojo/knuckle/internal/validate"
 )
 
-// buildWelcomeForm creates the huh form for the Welcome step.
-func (m *Model) buildWelcomeForm() *huh.Form {
-	channels := []huh.Option[string]{
-		huh.NewOption("stable — recommended for production", "stable"),
-		huh.NewOption("lts — long-term support", "lts"),
-		huh.NewOption("beta — next stable candidate", "beta"),
-		huh.NewOption("alpha — bleeding edge", "alpha"),
-		huh.NewOption("edge — nightly builds", "edge"),
-	}
-
-	helpText := "This wizard will install Flatcar Container Linux on your system.\nIt will configure networking, users, and write the OS to disk.\n\nPress Ctrl+A for advanced options."
-	if m.showAdvanced {
-		helpText = "Advanced mode enabled. Press Ctrl+A to hide.\n\nVersion pinning installs a specific Flatcar release.\nExternal Ignition URL skips the wizard entirely."
-	}
-
-	fields := []huh.Field{
-		huh.NewNote().
-			Title("Welcome to Knuckle").
-			Description(helpText),
-		huh.NewSelect[string]().
-			Title("Release Channel").
-			Description("Choose the update track for this machine").
-			Options(channels...).
-			Value(&m.Wizard.State.Config.Channel),
-	}
-
-	if m.showAdvanced {
-		fields = append(fields,
-			huh.NewInput().
-				Title("Version Pin").
-				Description("Install a specific version instead of latest").
-				Placeholder("e.g. 4593.2.1 or current-2024 for LTS").
-				Value(&m.Wizard.State.Config.Version),
-			huh.NewInput().
-				Title("External Ignition URL").
-				Description("Skip wizard — pass this URL directly to flatcar-install").
-				Placeholder("https://example.com/config.ign").
-				Value(&m.Wizard.State.Config.IgnitionURL),
-		)
-	}
-
-	return huh.NewForm(
-		huh.NewGroup(fields...),
-	).WithTheme(huh.ThemeDracula()).WithShowHelp(true).WithWidth(80)
-}
-
 // buildNetworkForm creates the huh form for the Network step.
 func (m *Model) buildNetworkForm() *huh.Form {
 	// Build interface options from detected interfaces
@@ -244,12 +198,6 @@ func (m *Model) reviewSummary() string {
 	return b.String()
 }
 
-
-// renderProgressBar returns the zen chrome (used by non-form step views).
-func (m *Model) renderProgressBar() string {
-	return m.renderZenChrome()
-}
-
 // buildBreadcrumb kept for form_logic.go compatibility.
 func (m *Model) buildBreadcrumb() string {
 	return m.renderZenChrome()
@@ -258,11 +206,6 @@ func (m *Model) buildBreadcrumb() string {
 // renderSystemChecks absorbed into zen chrome — returns empty.
 func (m *Model) renderSystemChecks() string {
 	return ""
-}
-
-// viewWelcomeHeader renders zen chrome for backward compat.
-func (m *Model) viewWelcomeHeader() string {
-	return m.renderZenChrome()
 }
 
 // renderZenChrome creates the ANSI-art inspired header.
@@ -307,46 +250,46 @@ func (m *Model) renderZenChrome() string {
 	cfg := &m.Wizard.State.Config
 	if m.Wizard.State.CurrentStep != model.StepWelcome {
 
-	// Channel as label, versions as tight key:value with │ separators
-	var verInfo string
-	if len(m.Wizard.State.Channels) > 0 {
-		for _, ch := range m.Wizard.State.Channels {
-			if ch.Channel == cfg.Channel {
-				verInfo = fmt.Sprintf("%s", accentColor.Render(ch.Channel)) +
-					dimColor.Render(" \u2502 ") +
-					infoColor.Render("v"+ch.Version) +
-					dimColor.Render(" \u2502 ") +
-					infoColor.Render("linux "+ch.Kernel) +
-					dimColor.Render(" \u2502 ") +
-					infoColor.Render("systemd "+ch.Systemd)
-				break
+		// Channel as label, versions as tight key:value with │ separators
+		var verInfo string
+		if len(m.Wizard.State.Channels) > 0 {
+			for _, ch := range m.Wizard.State.Channels {
+				if ch.Channel == cfg.Channel {
+					verInfo = accentColor.Render(ch.Channel) +
+						dimColor.Render(" \u2502 ") +
+						infoColor.Render("v"+ch.Version) +
+						dimColor.Render(" \u2502 ") +
+						infoColor.Render("linux "+ch.Kernel) +
+						dimColor.Render(" \u2502 ") +
+						infoColor.Render("systemd "+ch.Systemd)
+					break
+				}
 			}
 		}
-	}
-	if verInfo == "" {
-		verInfo = accentColor.Render(cfg.Channel)
-	}
+		if verInfo == "" {
+			verInfo = accentColor.Render(cfg.Channel)
+		}
 
-	b.WriteString("  ")
-	b.WriteString(verInfo)
+		b.WriteString("  ")
+		b.WriteString(verInfo)
 
-	if len(m.Wizard.State.SystemChecks) > 0 {
-		b.WriteString(dimColor.Render("  \u2502  "))
-		for i, check := range m.Wizard.State.SystemChecks {
-			switch check.Status {
-			case "ok":
-				b.WriteString(okDot.Render("\u25cf"))
-			case "warn":
-				b.WriteString(warnDot.Render("\u25cf"))
-			default:
-				b.WriteString(failDot.Render("\u25cf"))
-			}
-			if i < len(m.Wizard.State.SystemChecks)-1 {
-				b.WriteString(" ")
+		if len(m.Wizard.State.SystemChecks) > 0 {
+			b.WriteString(dimColor.Render("  \u2502  "))
+			for i, check := range m.Wizard.State.SystemChecks {
+				switch check.Status {
+				case "ok":
+					b.WriteString(okDot.Render("\u25cf"))
+				case "warn":
+					b.WriteString(warnDot.Render("\u25cf"))
+				default:
+					b.WriteString(failDot.Render("\u25cf"))
+				}
+				if i < len(m.Wizard.State.SystemChecks)-1 {
+					b.WriteString(" ")
+				}
 			}
 		}
-	}
-	b.WriteString("\n")
+		b.WriteString("\n")
 	} // end if not Welcome
 
 	// Step progress: thin line

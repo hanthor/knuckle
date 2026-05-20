@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/castrojo/knuckle/internal/model"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // TestFullFlowE2E simulates the EXACT user journey through all 9 steps.
