@@ -465,6 +465,25 @@ func TestCheckConsistency(t *testing.T) {
 			},
 			wantErr: "duplicate username",
 		},
+		{
+			name: "external ignition URL skips auth check",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.IgnitionURL = "https://example.com/config.ign"
+				cfg.SSHKeys = nil
+				cfg.Users = nil
+				cfg.Channel = ""
+			},
+		},
+		{
+			name: "external ignition URL still requires disk",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.IgnitionURL = "https://example.com/config.ign"
+				cfg.SSHKeys = nil
+				cfg.Users = nil
+				cfg.Disk.DevPath = ""
+			},
+			wantErr: "no disk selected",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

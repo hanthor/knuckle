@@ -451,13 +451,13 @@ func TestValidateConsistency(t *testing.T) {
 			wantErr: "static network requires a gateway",
 		},
 		{
-			name: "ignition URL does not bypass auth check",
+			name: "ignition URL bypasses auth check",
 			cfg: model.InstallConfig{
 				Disk:        model.DiskInfo{DevPath: "/dev/sda"},
 				Channel:     "stable",
 				IgnitionURL: "https://example.com/config.ign",
 			},
-			wantErr: "at least one authentication method required",
+			wantErr: "",
 		},
 	}
 	for _, tt := range tests {

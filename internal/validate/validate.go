@@ -189,6 +189,13 @@ func GroupName(name string) error {
 
 // CheckConsistency validates the overall config for conflicting settings.
 func CheckConsistency(cfg *model.InstallConfig) error {
+	// External Ignition URL mode: only disk is required, skip auth/network checks
+	if cfg.IgnitionURL != "" {
+		if cfg.Disk.DevPath == "" {
+			return fmt.Errorf("no disk selected")
+		}
+		return nil
+	}
 	// Static network requires gateway and interface
 	if cfg.Network.Mode == model.NetworkStatic {
 		if cfg.Network.Gateway == "" {
