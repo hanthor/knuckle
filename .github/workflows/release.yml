@@ -45,6 +45,13 @@ jobs:
           sha256sum knuckle-installer-stable-amd64.iso \
             > knuckle-installer-stable-amd64.iso.sha256
 
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          artifact-name: knuckle-linux-amd64.spdx.json
+          output-file: knuckle-linux-amd64.spdx.json
+          format: spdx-json
+
       - name: Sign artifacts with cosign (keyless, Sigstore)
         run: |
           cosign sign-blob --yes \
@@ -53,6 +60,9 @@ jobs:
           cosign sign-blob --yes \
             --bundle knuckle-installer-stable-amd64.iso.bundle \
             knuckle-installer-stable-amd64.iso
+          cosign sign-blob --yes \
+            --bundle knuckle-linux-amd64.spdx.json.bundle \
+            knuckle-linux-amd64.spdx.json
 
       - name: Create release and upload amd64 artifacts
         uses: softprops/action-gh-release@v2
@@ -62,6 +72,8 @@ jobs:
             knuckle-linux-amd64
             knuckle-linux-amd64.sha256
             knuckle-linux-amd64.bundle
+            knuckle-linux-amd64.spdx.json
+            knuckle-linux-amd64.spdx.json.bundle
             knuckle-installer-stable-amd64.iso
             knuckle-installer-stable-amd64.iso.sha256
             knuckle-installer-stable-amd64.iso.bundle
@@ -101,6 +113,13 @@ jobs:
           sha256sum knuckle-installer-stable-arm64.iso \
             > knuckle-installer-stable-arm64.iso.sha256
 
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          artifact-name: knuckle-linux-arm64.spdx.json
+          output-file: knuckle-linux-arm64.spdx.json
+          format: spdx-json
+
       - name: Sign artifacts with cosign (keyless, Sigstore)
         run: |
           cosign sign-blob --yes \
@@ -109,6 +128,9 @@ jobs:
           cosign sign-blob --yes \
             --bundle knuckle-installer-stable-arm64.iso.bundle \
             knuckle-installer-stable-arm64.iso
+          cosign sign-blob --yes \
+            --bundle knuckle-linux-arm64.spdx.json.bundle \
+            knuckle-linux-arm64.spdx.json
 
       - name: Upload arm64 artifacts to existing release
         uses: softprops/action-gh-release@v2
@@ -118,6 +140,8 @@ jobs:
             knuckle-linux-arm64
             knuckle-linux-arm64.sha256
             knuckle-linux-arm64.bundle
+            knuckle-linux-arm64.spdx.json
+            knuckle-linux-arm64.spdx.json.bundle
             knuckle-installer-stable-arm64.iso
             knuckle-installer-stable-arm64.iso.sha256
             knuckle-installer-stable-arm64.iso.bundle
