@@ -235,6 +235,21 @@ func CheckConsistency(cfg *model.InstallConfig) error {
 	if cfg.Channel == "" {
 		return fmt.Errorf("no channel selected")
 	}
+
+	// NVIDIA driver version must be a known series if set
+	if cfg.NvidiaDriverVersion != "" {
+		valid := false
+		for _, opt := range model.NvidiaDriverOptions {
+			if opt.ID == cfg.NvidiaDriverVersion {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("unknown NVIDIA driver series %q", cfg.NvidiaDriverVersion)
+		}
+	}
+
 	return nil
 }
 

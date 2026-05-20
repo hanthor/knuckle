@@ -623,3 +623,67 @@ func TestValidateWelcomeAcceptsValidChannels(t *testing.T) {
 		}
 	}
 }
+
+func TestNextSkipsNvidiaWhenNotSelected(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	// Set up valid config to advance to StepSysext
+	w.State.Config.Network.Mode = model.NetworkDHCP
+	w.State.Config.Disk.DevPath = "/dev/sda"
+	w.State.Config.Users = []model.UserConfig{
+		{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test"}},
+	}
+	w.State.Config.Channel = "stable"
+	// No nvidia-runtime in sysexts
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "docker", Selected: true},
+	}
+	w.State.CurrentStep = model.StepSysext
+
+	if err := w.Next(); err != nil {
+		t.Fatalf("Next from Sysext: %v", err)
+	}
+	// Should skip StepNvidia and go to StepUpdate
+	if w.State.CurrentStep != model.StepUpdate {
+		t.Errorf("expected StepUpdate (skip nvidia), got %v", w.State.CurrentStep)
+	}
+}
+
+func TestNextVisitsNvidiaWhenSelected(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.Config.Network.Mode = model.NetworkDHCP
+	w.State.Config.Disk.DevPath = "/dev/sda"
+	w.State.Config.Users = []model.UserConfig{
+		{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test"}},
+	}
+	w.State.Config.Channel = "stable"
+	// nvidia-runtime IS selected
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "nvidia-runtime", Selected: true},
+	}
+	w.State.CurrentStep = model.StepSysext
+
+	if err := w.Next(); err != nil {
+		t.Fatalf("Next from Sysext: %v", err)
+	}
+	if w.State.CurrentStep != model.StepNvidia {
+		t.Errorf("expected StepNvidia when nvidia-runtime selected, got %v", w.State.CurrentStep)
+	}
+}
+
+func TestGoToStepRefusesNvidiaWhenNotSelected(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	// No nvidia-runtime selected
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "docker", Selected: true},
+	}
+
+	w.GoToStep(model.StepNvidia)
+	// Should NOT have moved to StepNvidia
+	if w.State.CurrentStep == model.StepNvidia {
+		t.Error("GoToStep should refuse StepNvidia when nvidia-runtime is not selected")
+	}
+	if w.State.CurrentStep != model.StepSysext {
+		t.Errorf("expected to stay on StepSysext, got %v", w.State.CurrentStep)
+	}
+}

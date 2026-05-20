@@ -121,6 +121,10 @@ func (w *Wizard) isNvidiaSelected() bool {
 // GoToStep jumps to a specific step (for review screen navigation)
 func (w *Wizard) GoToStep(step model.WizardStep) {
 	if step >= model.StepWelcome && step <= model.StepDone {
+		// StepNvidia is conditional — refuse jump when nvidia-runtime not selected.
+		if step == model.StepNvidia && !w.isNvidiaSelected() {
+			return
+		}
 		w.State.CurrentStep = step
 	}
 }

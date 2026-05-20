@@ -162,7 +162,7 @@ storage:
       overwrite: true
       contents:
         inline: |
-          nvidia-drivers-{{.NvidiaDriverVersion}}
+          nvidia-drivers-{{.NvidiaDriverVersion | yamlEscape}}
 {{- end}}
 {{- if .Timezone}}
   links:

@@ -484,6 +484,13 @@ func TestCheckConsistency(t *testing.T) {
 			},
 			wantErr: "no disk selected",
 		},
+		{
+			name: "invalid nvidia driver version",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.NvidiaDriverVersion = "bogus"
+			},
+			wantErr: "unknown NVIDIA driver series",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

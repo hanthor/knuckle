@@ -670,6 +670,56 @@ func TestToInstallConfig_DefaultArch(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_NvidiaDriverVersion(t *testing.T) {
+	cfg := Config{
+		Channel:             "stable",
+		Hostname:            "gpu-node",
+		Network:             NetworkConfig{Mode: "dhcp"},
+		Users:               []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:                "/dev/vdb",
+		NvidiaDriverVersion: "570-open",
+		UpdateStrategy:      "reboot",
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nvidia.json")
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if loaded.NvidiaDriverVersion != "570-open" {
+		t.Errorf("nvidia_driver_version: got %q, want 570-open", loaded.NvidiaDriverVersion)
+	}
+}
+
+func TestValidate_InvalidNvidiaDriver(t *testing.T) {
+	cfg := &Config{
+		Channel:             "stable",
+		Hostname:            "test",
+		Network:             NetworkConfig{Mode: "dhcp"},
+		Users:               []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:                "/dev/vdb",
+		NvidiaDriverVersion: "bogus-driver",
+		UpdateStrategy:      "reboot",
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid nvidia_driver_version")
+	}
+	if !strings.Contains(err.Error(), "nvidia_driver_version") {
+		t.Errorf("error should mention nvidia_driver_version, got: %v", err)
+	}
+}
+
 func TestToInstallConfig_Arm64(t *testing.T) {
 	cfg := Config{
 		Arch:           "arm64",

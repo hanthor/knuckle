@@ -676,3 +676,48 @@ func TestGenerateButaneNvidiaWithSysexts(t *testing.T) {
 		t.Error("expected nvidia-drivers-550-open in enabled-sysext.conf")
 	}
 }
+
+func TestGenerateButaneNvidiaDriverVersionEscaped(t *testing.T) {
+	// Verify that a malicious NvidiaDriverVersion with newlines is escaped,
+	// preventing YAML injection into the Butane template.
+	// yamlEscape converts \n to literal \n text, so the injected content
+	// stays on one line in the YAML block scalar — not parsed as a new entry.
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname:            "inject-test",
+		Network:             model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:               []model.UserConfig{{Username: "core"}},
+		NvidiaDriverVersion: "570-open\n    - path: /etc/shadow",
+	}
+
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The injected newline must be escaped. In YAML literal block (|), a real
+	// newline would create a new line that could be parsed as a sibling YAML key.
+	// After yamlEscape, the output should contain the escaped sequence on one line.
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "nvidia-drivers-") {
+			// This line should contain the ENTIRE injected payload as escaped text
+			if !strings.Contains(line, "nvidia-drivers-570-open") {
+				t.Error("expected nvidia-drivers-570-open on the sysext line")
+			}
+			// The \n should be escaped to literal backslash-n, keeping payload on same line
+			if !strings.Contains(line, `\n`) {
+				t.Error("expected escaped \\n in output — newline not escaped")
+			}
+			break
+		}
+	}
+
+	// Verify no line starts with "    - path: /etc/shadow" (would indicate YAML injection)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- path: /etc/shadow") {
+			t.Fatal("YAML injection: /etc/shadow appeared as a separate YAML path entry")
+		}
+	}
+}

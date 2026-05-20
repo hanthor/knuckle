@@ -271,6 +271,20 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("update_strategy: must be reboot, off, or etcd-lock (got %q)", c.UpdateStrategy)
 	}
 
+	// NVIDIA driver version must be a known series
+	if c.NvidiaDriverVersion != "" {
+		valid := false
+		for _, opt := range model.NvidiaDriverOptions {
+			if opt.ID == c.NvidiaDriverVersion {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("nvidia_driver_version: unknown series %q", c.NvidiaDriverVersion)
+		}
+	}
+
 	return nil
 }
 
