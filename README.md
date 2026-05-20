@@ -16,7 +16,7 @@ Flatcar is typically provisioned in cloud environments via Butane and ignition c
 
 ## How to Try it? 
 
-- [Download an ISO] for ARM or AMD64 and install it.
+- [Download an ISO](https://github.com/castrojo/knuckle/releases) for ARM or AMD64 and install it.
 - Follow the installer you'll be left with a pristine upstream install of Flatcar linux
 
 [progress](https://github.com/user-attachments/assets/0d4160da-8731-4a92-b103-98b901dd9c3d)
