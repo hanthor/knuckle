@@ -5,8 +5,9 @@ import (
 	_ "embed"
 	"strings"
 
-	"golang.org/x/crypto/openpgp"           //nolint:staticcheck // openpgp is deprecated upstream but still correct for verifying Flatcar's legacy GPG-signed artifacts
-	"golang.org/x/crypto/openpgp/clearsign" //nolint:staticcheck
+	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp/clearsign"
+	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
 //go:embed keys/flatcar-signing.asc
@@ -30,6 +31,7 @@ func verifyFlatcarSignature(signedMessage string) bool {
 	_, err = openpgp.CheckDetachedSignature(keyring,
 		bytes.NewReader(block.Plaintext),
 		block.ArmoredSignature.Body,
+		&packet.Config{},
 	)
 	return err == nil
 }

@@ -78,16 +78,11 @@ func fetchChannelInfoFromURLs(ctx context.Context, channel, versionURL, pkgURL s
 		digestURL := sbomURL + ".DIGESTS"
 		if digestBody, err := httpGet(ctx, digestURL); err == nil {
 			info.DigestVerified = verifySHA512(sbomBody, digestBody)
-			// Attempt cryptographic GPG verification against the embedded Flatcar key.
-			// verifyFlatcarSignature requires github.com/ProtonMail/go-crypto (B1 blocker).
-			// Until that dependency is added, fall back to presence check.
+			// Cryptographic GPG verification against the embedded Flatcar key.
 			ascURL := digestURL + ".asc"
 			if ascBody, err := httpGet(ctx, ascURL); err == nil {
 				if ok := verifyFlatcarSignature(ascBody); ok {
 					info.SignedDigest = true
-				} else {
-					// Presence check fallback — file exists but crypto verify failed
-					info.SignedDigest = true // TODO: remove when ProtonMail dep is added
 				}
 			}
 		}

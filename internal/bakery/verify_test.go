@@ -7,12 +7,6 @@ import (
 )
 
 func TestVerifyFlatcarSignature_ValidSignature(t *testing.T) {
-	// TODO: this test requires github.com/ProtonMail/go-crypto (B1 blocker).
-	// The deprecated golang.org/x/crypto/openpgp fails on signatures with
-	// notation subpackets (present in all current Flatcar release sigs).
-	// Until the dependency is approved, skip rather than fail.
-	t.Skip("requires ProtonMail/go-crypto — see B1 in docs/REVIEW-2026-05-19.md")
-
 	data, err := os.ReadFile("testdata/flatcar_sbom.DIGESTS.asc")
 	if err != nil {
 		t.Fatalf("reading fixture: %v", err)
