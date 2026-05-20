@@ -272,7 +272,7 @@ xorriso -as mkisofs \
     -eltorito-alt-boot \
     -e efi.img \
     -no-emul-boot \
-    -isohybrid-gpt-basdat \
+    --efi-boot-part --efi-boot-image \
     "$ISO_DIR" 2>/dev/null
 
 echo ""

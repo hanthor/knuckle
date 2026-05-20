@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -66,6 +67,10 @@ type Model struct {
 	githubUserInput  string
 	sshKeyInput      string
 	showAdvanced     bool
+
+	// Sysext list (bubbles/list)
+	sysextList      list.Model
+	sysextListReady bool
 
 	// Install progress
 	spinner       spinner.Model
@@ -298,6 +303,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleEnter()
 	case "tab", "down", "j":
 		m.confirmQuit = false
+		if m.Wizard.State.CurrentStep == model.StepSysext && m.sysextListReady {
+			// Delegate to bubbles/list.
+			var cmd tea.Cmd
+			m.sysextList, cmd = m.sysextList.Update(msg)
+			m.cursor = m.sysextListCursorIdx()
+			return m, cmd
+		}
 		if len(m.fields) > 0 {
 			m.fieldIdx = (m.fieldIdx + 1) % len(m.fields)
 		} else {
@@ -313,6 +325,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "shift+tab", "up", "k":
+		if m.Wizard.State.CurrentStep == model.StepSysext && m.sysextListReady {
+			var cmd tea.Cmd
+			m.sysextList, cmd = m.sysextList.Update(msg)
+			m.cursor = m.sysextListCursorIdx()
+			return m, cmd
+		}
 		if len(m.fields) > 0 {
 			m.fieldIdx--
 			if m.fieldIdx < 0 {
@@ -328,23 +346,34 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "esc":
+		// If sysext list is filtering, let esc clear the filter instead of going back.
+		if m.Wizard.State.CurrentStep == model.StepSysext && m.sysextListReady && m.sysextList.FilterState() == list.Filtering {
+			var cmd tea.Cmd
+			m.sysextList, cmd = m.sysextList.Update(msg)
+			m.cursor = m.sysextListCursorIdx()
+			return m, cmd
+		}
 		m.Wizard.Previous()
 		m.err = nil
 		m.initStepFields()
 		return m, nil
 	case " ":
-		if m.Wizard.State.CurrentStep == model.StepSysext && m.cursor < len(m.Wizard.State.Sysexts) {
-			m.Wizard.State.Sysexts[m.cursor].Selected = !m.Wizard.State.Sysexts[m.cursor].Selected
-			m.Wizard.State.Config.Sysexts = m.Wizard.State.Sysexts
-			// When toggling nvidia-runtime on/off, sync the driver version.
-			if m.Wizard.State.Sysexts[m.cursor].Name == "nvidia-runtime" {
-				if m.Wizard.State.Sysexts[m.cursor].Selected {
-					if m.Wizard.State.Config.NvidiaDriverVersion == "" {
-						m.Wizard.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+		if m.Wizard.State.CurrentStep == model.StepSysext {
+			idx := m.cursor
+			if idx < len(m.Wizard.State.Sysexts) {
+				m.Wizard.State.Sysexts[idx].Selected = !m.Wizard.State.Sysexts[idx].Selected
+				m.Wizard.State.Config.Sysexts = m.Wizard.State.Sysexts
+				// When toggling nvidia-runtime on/off, sync the driver version.
+				if m.Wizard.State.Sysexts[idx].Name == "nvidia-runtime" {
+					if m.Wizard.State.Sysexts[idx].Selected {
+						if m.Wizard.State.Config.NvidiaDriverVersion == "" {
+							m.Wizard.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+						}
+					} else {
+						m.Wizard.State.Config.NvidiaDriverVersion = ""
 					}
-				} else {
-					m.Wizard.State.Config.NvidiaDriverVersion = ""
 				}
+				m.refreshSysextListTitle()
 			}
 		} else if len(m.fields) > 0 {
 			m.fields[m.fieldIdx].value += " "
@@ -356,6 +385,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	default:
+		// Delegate to sysext list for filter input and other keys.
+		if m.Wizard.State.CurrentStep == model.StepSysext && m.sysextListReady {
+			var cmd tea.Cmd
+			m.sysextList, cmd = m.sysextList.Update(msg)
+			m.cursor = m.sysextListCursorIdx()
+			return m, cmd
+		}
 		if len(m.fields) > 0 && len(msg.String()) == 1 {
 			m.fields[m.fieldIdx].value += msg.String()
 		}
@@ -675,6 +711,9 @@ func (m *Model) initStepFields() {
 		}
 	case model.StepUpdate:
 		// No fields — cursor-select screen
+	case model.StepSysext:
+		// Initialize bubbles/list for sysext selection.
+		m.initSysextList()
 	}
 }
 
@@ -798,9 +837,26 @@ func (m *Model) viewSysext() string {
 		return b.String()
 	}
 
-	// Group entry indices by support tier, preserving bakery fetch order within each tier.
-	// m.cursor always indexes Sysexts[] directly (Approach A);
-	// tier section headers are display-only and never part of the cursor index space.
+	// Use bubbles/list if initialized.
+	if m.sysextListReady {
+		// Sync cursor → list position.
+		listIdx := m.sysextListLookup(m.cursor)
+		if m.sysextList.Index() != listIdx {
+			m.sysextList.Select(listIdx)
+		}
+		m.sysextList.Title = m.sysextTitle()
+
+		b.WriteString(m.sysextList.View())
+		b.WriteString("\n")
+
+		// Detail panel for the currently highlighted item.
+		if item, ok := m.sysextList.SelectedItem().(sysextItem); ok {
+			b.WriteString(m.renderDetailPanel(item.entry))
+		}
+		return b.String()
+	}
+
+	// Fallback: manual rendering (list not initialized).
 	tierOrder := []string{bakery.TierIntegrated, bakery.TierMaintained, bakery.TierExperimental}
 	tierMap := map[string][]int{}
 	var otherIndices []int
@@ -1136,6 +1192,15 @@ func (m *Model) viewDone() string {
 	}
 	if len(cfg.Users) > 0 && cfg.Users[0].Username != "" {
 		fmt.Fprintf(&b, "  User:     %s\n", cfg.Users[0].Username)
+	}
+
+	if cfg.NvidiaDriverVersion != "" {
+		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		accent := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+		b.WriteString("\n")
+		b.WriteString(accent.Render("  NVIDIA GPU verification (run after first boot):") + "\n")
+		b.WriteString(dimStyle.Render("    nvidia-smi") + "\n")
+		b.WriteString(dimStyle.Render("    docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu22.04 nvidia-smi") + "\n")
 	}
 
 	b.WriteString("\n")
