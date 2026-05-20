@@ -225,6 +225,29 @@ func TestURL(t *testing.T) {
 	}
 }
 
+func TestIgnitionURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid https", "https://example.com/config.ign", false},
+		{"valid file", "file:///etc/ignition/config.ign", false},
+		{"rejects http", "http://example.com/config.ign", true},
+		{"rejects empty", "", true},
+		{"rejects bare path", "/etc/config.ign", true},
+		{"rejects ftp", "ftp://example.com/config.ign", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := IgnitionURL(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("IgnitionURL(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestNonEmpty(t *testing.T) {
 	tests := []struct {
 		name    string

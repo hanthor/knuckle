@@ -140,6 +140,22 @@ func URL(s string) error {
 	return nil
 }
 
+// IgnitionURL validates a remote Ignition config URL.
+// Requires https:// for remote URLs (Ignition configs may contain secrets).
+// Also allows file:// for local configs.
+func IgnitionURL(s string) error {
+	if s == "" {
+		return fmt.Errorf("ignition URL must not be empty")
+	}
+	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "file://") {
+		return nil
+	}
+	if strings.HasPrefix(s, "http://") {
+		return fmt.Errorf("ignition URL must use https:// (config may contain secrets); got http://")
+	}
+	return fmt.Errorf("ignition URL must start with https:// or file://")
+}
+
 // NonEmpty validates that a string is not empty after trimming whitespace.
 func NonEmpty(field, value string) error {
 	if strings.TrimSpace(value) == "" {

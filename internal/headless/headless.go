@@ -223,7 +223,7 @@ func (c *Config) Validate() error {
 
 	// IgnitionURL format
 	if c.IgnitionURL != "" {
-		if err := validate.URL(c.IgnitionURL); err != nil {
+		if err := validate.IgnitionURL(c.IgnitionURL); err != nil {
 			return fmt.Errorf("ignition_url: %w", err)
 		}
 	}
