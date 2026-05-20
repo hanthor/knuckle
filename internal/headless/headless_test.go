@@ -121,6 +121,31 @@ func TestValidate_MissingDisk(t *testing.T) {
 	}
 }
 
+func TestValidate_InvalidDiskPath(t *testing.T) {
+	cases := []struct {
+		disk string
+		desc string
+	}{
+		{"../../etc/passwd", "path traversal"},
+		{"sda", "no /dev/ prefix"},
+		{"/etc/passwd", "not a /dev/ path"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			cfg := &Config{
+				Channel:  "stable",
+				Hostname: "node01",
+				Network:  NetworkConfig{Mode: "dhcp"},
+				Users:    []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+				Disk:     tc.disk,
+			}
+			if err := cfg.Validate(); err == nil {
+				t.Errorf("expected error for disk=%q (%s)", tc.disk, tc.desc)
+			}
+		})
+	}
+}
+
 func TestValidate_MissingUsers(t *testing.T) {
 	cfg := &Config{
 		Channel:  "stable",

@@ -47,18 +47,38 @@ This document covers each.
   `flatcar_production_image_sbom.json`, verifies SHA512 against the matching
   `.DIGESTS` file, and surfaces the result in the channel screen as
   `DigestVerified`.
+- **Cosign keyless signing.** Every release binary (`knuckle`) and ISO
+  (`knuckle-installer-stable.iso`) is signed with `cosign sign-blob --yes`
+  using GitHub Actions OIDC (keyless). Signatures are recorded in the Sigstore
+  Rekor transparency log. Bundles (`.bundle` files) are published alongside
+  release artifacts.
+
+### Verifying a release (users)
+
+No GPG required. Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) then:
+
+```sh
+# Download the binary and its bundle from the GitHub release page, then:
+cosign verify-blob \
+  --bundle knuckle.bundle \
+  --certificate-identity-regexp \
+    "https://github.com/castrojo/knuckle/.github/workflows/release.yml@refs/tags/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  knuckle
+```
+
+The same pattern applies to `knuckle-installer-stable.iso` / `knuckle-installer-stable.iso.bundle`.
 
 ### Known gaps (tracked, not fixed)
 
-- **GPG signatures are presence-checked, not verified.** `channels.go` sets
-  `info.SignedDigest = true` purely on the existence of `.DIGESTS.asc`. The
-  signature is never validated against a Flatcar release key. Tracked in
-  `docs/REVIEW-2026-05-19.md` (HIGH).
+- **Flatcar release GPG signatures are presence-checked, not verified.**
+  `channels.go` sets `info.SignedDigest = true` purely on the existence of
+  `.DIGESTS.asc`. The signature is never validated against the embedded Flatcar
+  release key. Note: this is about verifying *Flatcar's* upstream artifacts,
+  not knuckle's own binaries (which use cosign). Tracked HIGH.
 - **Sysext bakery downloads are unverified.** `internal/bakery/bakery.go`
   reads the GitHub Releases API but does not validate the `.sha256` or `.sig`
   alongside each `.raw` artifact. Tracked HIGH.
-- **Release binaries are not signed.** `release.yml` ships SHA256 sidecars
-  but no cosign signature or SBOM artifact. Tracked HIGH.
 - **No fuzz testing on input parsers.** `internal/validate`,
   `internal/ignition` parsers are reachable from user input but not fuzzed.
   Tracked MEDIUM.

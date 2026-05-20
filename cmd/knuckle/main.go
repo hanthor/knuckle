@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 
 	"github.com/castrojo/knuckle/internal/bakery"
 	"github.com/castrojo/knuckle/internal/headless"
@@ -116,8 +115,15 @@ func main() {
 		logger.Warn("channel info fetch failed", "error", err)
 	}
 
-	// Run the TUI
-	if err := tui.Run(w); err != nil {
+	// Run the TUI — wire reboot through the runner so dry-run/spy work correctly
+	var rebootFn func(context.Context) error
+	if !w.State.Config.DryRun {
+		rebootFn = func(ctx context.Context) error {
+			_, err := cmdRunner.Run(ctx, "systemctl", "reboot")
+			return err
+		}
+	}
+	if err := tui.Run(w, rebootFn); err != nil {
 		logger.Error("TUI error", "error", err)
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -169,10 +175,9 @@ func runHeadless(configPath string, dryRun bool, logFile string) {
 		os.Exit(1)
 	}
 
-	// Handle reboot
+	// Handle reboot through runner (keeps DryRunner/SpyRunner semantics)
 	if cfg.Reboot && !cfg.DryRun {
-		cmd := exec.Command("systemctl", "reboot")
-		if err := cmd.Run(); err != nil {
+		if _, err := cmdRunner.Run(ctx, "systemctl", "reboot"); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: reboot failed: %v\n", err)
 			os.Exit(1)
 		}

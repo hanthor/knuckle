@@ -174,6 +174,11 @@ func (c *Config) Validate() error {
 	if c.Disk == "" && c.IgnitionURL == "" {
 		return fmt.Errorf("disk: required (specify target disk path)")
 	}
+	if c.Disk != "" {
+		if err := validate.DiskPath(c.Disk); err != nil {
+			return fmt.Errorf("disk: %w", err)
+		}
+	}
 
 	// Users (required unless using external ignition URL)
 	if c.IgnitionURL == "" {

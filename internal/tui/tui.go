@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -43,6 +42,7 @@ type fetchKeysMsg struct {
 // Model is the top-level Bubble Tea model
 type Model struct {
 	Wizard        *wizard.Wizard
+	rebootFn      func(context.Context) error // nil ⇒ dry-run / test mode
 	width         int
 	height        int
 	err           error
@@ -247,10 +247,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			if m.confirmReboot {
 				m.quitting = true
-				return m, tea.Sequence(
-					tea.ExecProcess(exec.Command("systemctl", "reboot"), nil),
-					tea.Quit,
-				)
+				reboot := m.rebootFn
+				return m, func() tea.Msg {
+					if reboot != nil {
+						_ = reboot(context.Background())
+					}
+					return tea.QuitMsg{}
+				}
 			}
 			m.confirmReboot = true
 			m.err = fmt.Errorf("press r again to confirm reboot")
@@ -845,9 +848,11 @@ func (m *Model) viewDone() string {
 	return b.String()
 }
 
-// Run starts the Bubble Tea program
-func Run(w *wizard.Wizard) error {
+// Run starts the Bubble Tea program. rebootFn is called when the user
+// confirms reboot on the Done screen; pass nil to suppress (e.g. dry-run).
+func Run(w *wizard.Wizard, rebootFn func(context.Context) error) error {
 	m := New(w)
+	m.rebootFn = rebootFn
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
