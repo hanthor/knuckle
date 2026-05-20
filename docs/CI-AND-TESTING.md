@@ -161,7 +161,7 @@ Tracked in `docs/REVIEW-2026-05-19.md` (passes 1-2) and session notes from
   `installCancel` stored in Model, called on all quit paths).
 - ~~`just vm` required manual reboot step~~ — **fixed** (2026-05-20, `just vm`
   now boots installed system automatically after knuckle exits).
-- ~~Blocker B1~~ GPG signature verification — **closed** (cosign keyless signing).
+- ~~Blocker B1~~ GPG signature verification — **closed**. `internal/bakery/verify.go` validates Flatcar release `.DIGESTS.asc` against the embedded signing key. Separate from knuckle's own release artifact signing (cosign keyless via Sigstore in `release.yml`).
 - ~~Blocker B2~~ Reboot via runner — **closed**.
 - ~~Blocker B3~~ `validate.DiskPath()` in headless — **closed**.
 - ~~Blocker B4~~ SSH keys reaching Ignition — **closed** (2026-05-20).
