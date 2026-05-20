@@ -414,6 +414,7 @@ vm-e2e:
     echo "  ✓ installer VM ready"
 
     echo "[2/4] Running headless install (static network config)..."
+    $E2E_SCP bin/knuckle core@127.0.0.1:/tmp/knuckle >/dev/null
     $E2E_SCP .vm/e2e-static-config.json core@127.0.0.1:/tmp/e2e-static-config.json >/dev/null
     if ! $E2E_SSH "timeout 15m sudo /tmp/knuckle --headless --config /tmp/e2e-static-config.json --log-file /tmp/knuckle-static.log"; then
         echo "❌ headless install (static) failed — knuckle-static.log:"
@@ -502,6 +503,7 @@ vm-e2e:
     echo "  ✓ installer VM ready"
 
     echo "[2/4] Running headless install with docker sysext (downloads ~400MB + sysext)..."
+    $E2E_SCP bin/knuckle core@127.0.0.1:/tmp/knuckle >/dev/null
     $E2E_SCP .vm/e2e-sysext-config.json core@127.0.0.1:/tmp/e2e-sysext-config.json >/dev/null
     if ! $E2E_SSH "timeout 25m sudo /tmp/knuckle --headless --config /tmp/e2e-sysext-config.json --log-file /tmp/knuckle-sysext.log"; then
         echo "❌ sysext install failed — knuckle-sysext.log:"
@@ -560,7 +562,96 @@ vm-e2e:
     echo ""
     echo "✅ SYSEXT pass PASSED"
     echo ""
-    echo "✅ ALL vm-e2e passes PASSED (DHCP · static network · sysext)"
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # NVIDIA PASS — verify enabled-sysext.conf kernel driver config
+    # ══════════════════════════════════════════════════════════════════════════
+    echo "=== vm-e2e NVIDIA pass ==="
+    echo ""
+
+    # Headless config with nvidia_driver_version (no nvidia-runtime sysext — testing kernel driver path only)
+    printf '{"channel":"stable","hostname":"nvidia-test","timezone":"UTC","network":{"mode":"dhcp"},"users":[{"username":"core","ssh_keys":["%s"]}],"disk":"/dev/vdb","nvidia_driver_version":"570-open","update_strategy":"off","reboot":false}\n' \
+        "$E2E_PUB" > .vm/e2e-nvidia-config.json
+
+    # Fresh disks
+    just _kill-vm
+    rm -f .vm/boot.qcow2 .vm/target-nvidia.qcow2
+    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base_{{ KNUCKLE_ARCH }}.img" -F qcow2 .vm/boot.qcow2 >/dev/null
+    qemu-img create -f qcow2 .vm/target-nvidia.qcow2 20G >/dev/null
+
+    echo "[1/4] Booting installer VM (NVIDIA pass)..."
+    {{ QEMU }} \
+        -m 4096 -smp 2 -enable-kvm \
+        -drive if=virtio,file=.vm/boot.qcow2,format=qcow2 \
+        -drive if=virtio,file=.vm/target-nvidia.qcow2,format=qcow2 \
+        -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/e2e-installer.ign \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid \
+        -serial file:.vm/e2e-nvidia-installer-serial.log
+
+    ok=0
+    for i in $(seq 1 40); do
+        $E2E_SSH -o ConnectTimeout=3 true 2>/dev/null && ok=1 && break
+        sleep 3
+    done
+    [ "$ok" = "1" ] || { echo "❌ installer VM never came up"; tail -20 .vm/e2e-nvidia-installer-serial.log 2>/dev/null; exit 1; }
+    echo "  ✓ installer VM ready"
+
+    echo "[2/4] Running headless install (NVIDIA kernel driver config)..."
+    $E2E_SCP bin/knuckle core@127.0.0.1:/tmp/knuckle >/dev/null
+    $E2E_SCP .vm/e2e-nvidia-config.json core@127.0.0.1:/tmp/e2e-nvidia-config.json >/dev/null
+    if ! $E2E_SSH "timeout 15m sudo /tmp/knuckle --headless --config /tmp/e2e-nvidia-config.json --log-file /tmp/knuckle-nvidia.log"; then
+        echo "❌ headless install (nvidia) failed — knuckle-nvidia.log:"
+        $E2E_SSH "cat /tmp/knuckle-nvidia.log" 2>/dev/null || true
+        exit 1
+    fi
+    echo "  ✓ nvidia install completed"
+
+    echo "[3/4] Booting nvidia-configured installed disk..."
+    just _kill-vm
+    {{ QEMU }} \
+        -m 4096 -smp 2 -enable-kvm \
+        -drive if=virtio,file=.vm/target-nvidia.qcow2,format=qcow2 \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid \
+        -serial file:.vm/e2e-nvidia-target-serial.log
+
+    ok=0
+    for i in $(seq 1 60); do
+        $E2E_SSH -o ConnectTimeout=3 true 2>/dev/null && ok=1 && break
+        sleep 3
+    done
+    [ "$ok" = "1" ] || { echo "❌ installed system never booted"; tail -30 .vm/e2e-nvidia-target-serial.log 2>/dev/null; exit 1; }
+    echo "  ✓ nvidia-configured system SSH accessible"
+
+    echo "[4/4] Verifying NVIDIA configuration on installed system..."
+
+    # Hostname
+    ACTUAL_HOSTNAME=$($E2E_SSH hostname)
+    if [ "$ACTUAL_HOSTNAME" = "nvidia-test" ]; then
+        echo "  ✓ hostname: nvidia-test"
+    else
+        echo "❌ hostname mismatch: expected nvidia-test, got $ACTUAL_HOSTNAME"
+        exit 1
+    fi
+
+    # enabled-sysext.conf must exist with nvidia-drivers-570-open
+    if SYSEXT_CONF=$($E2E_SSH "cat /etc/flatcar/enabled-sysext.conf" 2>/dev/null); then
+        if echo "$SYSEXT_CONF" | grep -q "nvidia-drivers-570-open"; then
+            echo "  ✓ /etc/flatcar/enabled-sysext.conf contains nvidia-drivers-570-open"
+        else
+            echo "❌ enabled-sysext.conf exists but wrong content: $SYSEXT_CONF"
+            exit 1
+        fi
+    else
+        echo "❌ /etc/flatcar/enabled-sysext.conf not found on installed system"
+        exit 1
+    fi
+
+    echo ""
+    echo "✅ NVIDIA pass PASSED"
+    echo ""
+    echo "✅ ALL vm-e2e passes PASSED (DHCP · static network · sysext · NVIDIA)"
 
 # SSH into running VM
 ssh:
