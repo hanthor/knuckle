@@ -81,8 +81,9 @@ echo "  systemd-boot: $SDBOOT_EFI"
 # ── 1. Build knuckle binary (skipped when binary already present) ─────────────
 if [[ ! -f "$BINARY" ]]; then
     echo "[1/5] Building knuckle..."
+    VERSION="$(git -C "$ROOT_DIR" describe --tags --always 2>/dev/null || echo dev)"
     (cd "$ROOT_DIR" && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
-        go build -ldflags="-s -w" -o bin/knuckle ./cmd/knuckle)
+        go build -ldflags="-s -w -X main.version=${VERSION}" -o bin/knuckle ./cmd/knuckle)
     BINARY="$ROOT_DIR/bin/knuckle"
 else
     echo "[1/5] Using existing knuckle binary: $BINARY"

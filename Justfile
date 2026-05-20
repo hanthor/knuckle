@@ -14,7 +14,11 @@ default:
 
 # Build the binary
 build:
-    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/knuckle ./cmd/knuckle
+    #!/usr/bin/env bash
+    VERSION=$(git describe --tags --always 2>/dev/null || echo dev)
+    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+        -ldflags="-s -w -X main.version=${VERSION}" \
+        -o bin/knuckle ./cmd/knuckle
 
 # Run tests
 test:
