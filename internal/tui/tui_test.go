@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/castrojo/knuckle/internal/model"
+	"github.com/castrojo/knuckle/internal/probe"
 	"github.com/castrojo/knuckle/internal/wizard"
 )
 
@@ -427,42 +428,98 @@ func TestNvidiaAutoSelectShownInView(t *testing.T) {
 	}
 }
 
-func TestNvidiaDriverVersionCycleForward(t *testing.T) {
+func TestViewNvidiaScreen(t *testing.T) {
 	w := newTestWizard()
-	w.State.CurrentStep = model.StepSysext
-	w.State.Sysexts = []model.SysextEntry{
-		{Name: "nvidia-runtime", Version: "1.17.9", Selected: true},
-	}
+	w.State.CurrentStep = model.StepNvidia
+	w.State.NvidiaGPUDetected = true
+	w.State.NvidiaGPUs = []probe.NvidiaGPUInfo{{PCIAddress: "0000:01:00.0", PCIClass: "0x030200"}}
 	w.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
 	m := New(w)
 	m.cursor = 0
+	m.width = 120
 
-	// Cycle forward one step.
-	m.cycleNvidiaDriverVersion(1)
-	if m.Wizard.State.Config.NvidiaDriverVersion == model.DefaultNvidiaDriverSeries {
-		t.Error("driver version should have changed after cycling forward")
+	view := m.View()
+
+	// Header.
+	if !strings.Contains(view, "NVIDIA GPU Setup") {
+		t.Error("GPU Setup screen should show 'NVIDIA GPU Setup' heading")
 	}
-	if m.Wizard.State.Config.NvidiaDriverVersion == "" {
-		t.Error("driver version must not be empty after cycling")
+	// GPU detection.
+	if !strings.Contains(view, "NVIDIA GPU detected") {
+		t.Error("GPU Setup screen should show GPU detection status")
+	}
+	if !strings.Contains(view, "0000:01:00.0") {
+		t.Error("GPU Setup screen should show PCI address of detected GPU")
+	}
+	// Two-component explanation.
+	if !strings.Contains(view, "kernel driver") && !strings.Contains(view, "Flatcar-official") {
+		t.Error("GPU Setup screen should explain the kernel driver component")
+	}
+	if !strings.Contains(view, "Container Toolkit") {
+		t.Error("GPU Setup screen should explain the Container Toolkit component")
+	}
+	if !strings.Contains(view, "enabled-sysext.conf") {
+		t.Error("GPU Setup screen should mention enabled-sysext.conf")
+	}
+	// Driver picker.
+	if !strings.Contains(view, "570") {
+		t.Error("GPU Setup screen should show 570 driver series")
+	}
+	if !strings.Contains(view, "460") {
+		t.Error("GPU Setup screen should show legacy 460 driver series")
 	}
 }
 
-func TestNvidiaDriverVersionCycleWraps(t *testing.T) {
+func TestViewNvidiaNoGPUDetected(t *testing.T) {
 	w := newTestWizard()
-	w.State.CurrentStep = model.StepSysext
-	w.State.Sysexts = []model.SysextEntry{
-		{Name: "nvidia-runtime", Version: "1.17.9", Selected: true},
-	}
-	// Start at the last option — cycling forward should wrap to first.
-	lastOpt := model.NvidiaDriverOptions[len(model.NvidiaDriverOptions)-1]
-	w.State.Config.NvidiaDriverVersion = lastOpt.ID
+	w.State.CurrentStep = model.StepNvidia
+	w.State.NvidiaGPUDetected = false
+	w.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
 	m := New(w)
-	m.cursor = 0
+	m.width = 120
 
-	m.cycleNvidiaDriverVersion(1)
-	if m.Wizard.State.Config.NvidiaDriverVersion != model.NvidiaDriverOptions[0].ID {
-		t.Errorf("expected wrap-around to %q, got %q",
-			model.NvidiaDriverOptions[0].ID, m.Wizard.State.Config.NvidiaDriverVersion)
+	view := m.View()
+	if !strings.Contains(view, "No NVIDIA GPU detected") {
+		t.Error("should show warning when no GPU was detected")
+	}
+}
+
+func TestNvidiaScreenCursorNavigation(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNvidia
+	w.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+	m := New(w)
+	// initStepFields() should position cursor at default driver.
+	m.initStepFields()
+
+	// Cursor should be at index of default series.
+	wantIdx := 0
+	for i, opt := range model.NvidiaDriverOptions {
+		if opt.ID == model.DefaultNvidiaDriverSeries {
+			wantIdx = i
+			break
+		}
+	}
+	if m.cursor != wantIdx {
+		t.Errorf("cursor should start at index %d (default driver), got %d", wantIdx, m.cursor)
+	}
+}
+
+func TestNvidiaScreenEnterConfirmsSelection(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNvidia
+	w.State.Config.NvidiaDriverVersion = model.DefaultNvidiaDriverSeries
+	// Add a sysext to satisfy any wizard nav guards.
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "nvidia-runtime", Selected: true},
+	}
+	m := New(w)
+	m.cursor = 3 // 460 (legacy proprietary)
+
+	_, _ = m.handleEnter()
+	if w.State.Config.NvidiaDriverVersion != model.NvidiaDriverOptions[3].ID {
+		t.Errorf("Enter on cursor=3 should set driver to %q, got %q",
+			model.NvidiaDriverOptions[3].ID, w.State.Config.NvidiaDriverVersion)
 	}
 }
 
@@ -493,29 +550,5 @@ func TestNvidiaDriverVersionSetOnToggle(t *testing.T) {
 	if w.State.Config.NvidiaDriverVersion != "" {
 		t.Errorf("NvidiaDriverVersion should be cleared when nvidia-runtime is deselected, got %q",
 			w.State.Config.NvidiaDriverVersion)
-	}
-}
-
-func TestNvidiaDriverVersionInDetailPanel(t *testing.T) {
-	w := newTestWizard()
-	w.State.CurrentStep = model.StepSysext
-	w.State.Sysexts = []model.SysextEntry{
-		{Name: "nvidia-runtime", Version: "1.17.9", Category: "GPU / Accelerators",
-			SupportTier: "Bakery Maintained", Selected: true},
-	}
-	w.State.Config.NvidiaDriverVersion = "570-open"
-	m := New(w)
-	m.cursor = 0
-	m.width = 120
-
-	view := m.View()
-	if !strings.Contains(view, "KERNEL DRIVER SERIES") {
-		t.Error("detail panel should show KERNEL DRIVER SERIES section for nvidia-runtime when selected")
-	}
-	if !strings.Contains(view, "570") {
-		t.Error("detail panel should show the current driver series (570)")
-	}
-	if !strings.Contains(view, "[ / ]") || !strings.Contains(view, "change") {
-		t.Error("detail panel should show [ / ] key hint for changing driver version")
 	}
 }

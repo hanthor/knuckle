@@ -11,6 +11,7 @@ const (
 	StepStorage
 	StepUser
 	StepSysext
+	StepNvidia // conditional: only visited when nvidia-runtime sysext is selected
 	StepUpdate
 	StepReview
 	StepInstall
@@ -30,6 +31,8 @@ func (s WizardStep) String() string {
 		return "User"
 	case StepSysext:
 		return "Sysext"
+	case StepNvidia:
+		return "GPU Setup"
 	case StepUpdate:
 		return "Update Strategy"
 	case StepReview:
@@ -136,17 +139,35 @@ type NvidiaDriverSeries struct {
 	// ID is the series identifier appended to "nvidia-drivers-" in enabled-sysext.conf.
 	// e.g. ID "570-open" → "nvidia-drivers-570-open".
 	ID          string
-	Label       string
+	Label       string // short label for the list row
+	Description string // one-sentence GPU compatibility note shown on the GPU Setup screen
 	Recommended bool
 }
 
 // NvidiaDriverOptions is the ordered list of available NVIDIA kernel driver series.
 // Latest / recommended is first. Update when Flatcar adds or drops a driver series.
 var NvidiaDriverOptions = []NvidiaDriverSeries{
-	{ID: "570-open", Label: "570 · open-source · RTX 20xx+ (recommended)", Recommended: true},
-	{ID: "550-open", Label: "550 · open-source · LTS branch"},
-	{ID: "535-open", Label: "535 · open-source · older LTS"},
-	{ID: "460", Label: "460 · proprietary · Kepler / Maxwell / Pascal GPUs"},
+	{
+		ID:          "570-open",
+		Label:       "570  open-source  (latest)",
+		Description: "RTX 20xx / 30xx / 40xx, A-series, H-series, and newer. Recommended for all modern NVIDIA GPUs.",
+		Recommended: true,
+	},
+	{
+		ID:          "550-open",
+		Label:       "550  open-source  (LTS)",
+		Description: "Long-term support branch. Same GPU support as 570-open. Prefer when stability over recency matters.",
+	},
+	{
+		ID:          "535-open",
+		Label:       "535  open-source  (older LTS)",
+		Description: "Older LTS branch. Supports RTX 20xx and newer. Use if 570/550 have issues on your hardware.",
+	},
+	{
+		ID:          "460",
+		Label:       "460  proprietary  (legacy GPUs)",
+		Description: "Required for GTX 9xx/10xx, GTX 600/700, Quadro/Tesla Kepler/Maxwell/Pascal. Not open-source.",
+	},
 }
 
 // DefaultNvidiaDriverSeries is the driver series selected when auto-detecting an NVIDIA GPU.

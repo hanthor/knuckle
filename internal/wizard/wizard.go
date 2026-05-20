@@ -29,6 +29,7 @@ type State struct {
 	// Since knuckle installs to the machine it runs on, detected GPUs will be present
 	// on the installed system too — used to auto-select the nvidia-runtime sysext.
 	NvidiaGPUDetected bool
+	NvidiaGPUs        []probe.NvidiaGPUInfo // detected GPU details for display in GPU Setup screen
 
 	// Channel version info (fetched at startup)
 	Channels []bakery.ChannelInfo
@@ -88,6 +89,10 @@ func (w *Wizard) Next() error {
 
 	if w.State.CurrentStep < model.StepDone {
 		w.State.CurrentStep++
+		// StepNvidia is conditional — only visit it when nvidia-runtime is selected.
+		if w.State.CurrentStep == model.StepNvidia && !w.isNvidiaSelected() {
+			w.State.CurrentStep++
+		}
 	}
 	return nil
 }
@@ -96,7 +101,21 @@ func (w *Wizard) Next() error {
 func (w *Wizard) Previous() {
 	if w.State.CurrentStep > model.StepWelcome {
 		w.State.CurrentStep--
+		// StepNvidia is conditional — skip back over it when nvidia-runtime is not selected.
+		if w.State.CurrentStep == model.StepNvidia && !w.isNvidiaSelected() {
+			w.State.CurrentStep--
+		}
 	}
+}
+
+// isNvidiaSelected returns true when the nvidia-runtime sysext is toggled on.
+func (w *Wizard) isNvidiaSelected() bool {
+	for _, s := range w.State.Sysexts {
+		if s.Name == "nvidia-runtime" && s.Selected {
+			return true
+		}
+	}
+	return false
 }
 
 // GoToStep jumps to a specific step (for review screen navigation)
@@ -119,6 +138,8 @@ func (w *Wizard) ValidateCurrentStep() error {
 		return w.validateUser()
 	case model.StepSysext:
 		return nil // sysext selection is optional
+	case model.StepNvidia:
+		return nil // driver series has a safe default; no validation needed
 	case model.StepUpdate:
 		return nil // update strategy selection is optional (defaults to "reboot")
 	case model.StepReview:
@@ -219,7 +240,9 @@ func (w *Wizard) ProbeHardware(ctx context.Context) error {
 	w.State.Interfaces = ifaces
 
 	// Detect NVIDIA GPUs via PCI sysfs — no driver required.
-	w.State.NvidiaGPUDetected = len(probe.DetectNvidiaGPUs()) > 0
+	gpus := probe.DetectNvidiaGPUs()
+	w.State.NvidiaGPUs = gpus
+	w.State.NvidiaGPUDetected = len(gpus) > 0
 
 	// Run system checks after hardware probe
 	w.runSystemChecks()

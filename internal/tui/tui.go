@@ -347,22 +347,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.fields[m.fieldIdx].value += " "
 		}
 		return m, nil
-	case "[":
-		if m.Wizard.State.CurrentStep == model.StepSysext &&
-			m.cursor < len(m.Wizard.State.Sysexts) &&
-			m.Wizard.State.Sysexts[m.cursor].Name == "nvidia-runtime" &&
-			m.Wizard.State.Sysexts[m.cursor].Selected {
-			m.cycleNvidiaDriverVersion(-1)
-		}
-		return m, nil
-	case "]":
-		if m.Wizard.State.CurrentStep == model.StepSysext &&
-			m.cursor < len(m.Wizard.State.Sysexts) &&
-			m.Wizard.State.Sysexts[m.cursor].Name == "nvidia-runtime" &&
-			m.Wizard.State.Sysexts[m.cursor].Selected {
-			m.cycleNvidiaDriverVersion(1)
-		}
-		return m, nil
 	case "ctrl+b":
 		if m.Wizard.State.CurrentStep == model.StepReview {
 			m.showButane = !m.showButane
@@ -385,6 +369,8 @@ func (m *Model) maxCursor() int {
 		return len(m.Wizard.State.Disks)
 	case model.StepSysext:
 		return len(m.Wizard.State.Sysexts)
+	case model.StepNvidia:
+		return len(model.NvidiaDriverOptions)
 	case model.StepUpdate:
 		return 3
 	default:
@@ -434,6 +420,11 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 				return m, m.activeForm.Init()
 			}
 			return m, nil
+		}
+	case model.StepNvidia:
+		// Confirm the cursor-selected driver series.
+		if m.cursor >= 0 && m.cursor < len(model.NvidiaDriverOptions) {
+			m.Wizard.State.Config.NvidiaDriverVersion = model.NvidiaDriverOptions[m.cursor].ID
 		}
 	case model.StepUpdate:
 		strategies := []string{"reboot", "off", "etcd-lock"}
@@ -642,6 +633,15 @@ func (m *Model) initStepFields() {
 	case model.StepWelcome:
 		// Card-based channel selector — no text fields
 		m.fields = nil
+	case model.StepNvidia:
+		// Position cursor at the currently configured driver version.
+		m.cursor = 0
+		for i, opt := range model.NvidiaDriverOptions {
+			if opt.ID == m.Wizard.State.Config.NvidiaDriverVersion {
+				m.cursor = i
+				break
+			}
+		}
 	case model.StepNetwork:
 		m.fields = []field{
 			{label: "Interface", key: "interface", value: m.Wizard.State.Config.Network.Interface},
@@ -697,6 +697,8 @@ func (m *Model) View() string {
 		b.WriteString(m.viewStorage())
 	case model.StepSysext:
 		b.WriteString(m.viewSysext())
+	case model.StepNvidia:
+		b.WriteString(m.viewNvidia())
 	case model.StepUpdate:
 		b.WriteString(m.viewUpdate())
 	case model.StepInstall:
@@ -712,7 +714,7 @@ func (m *Model) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑↓/jk navigate • space toggle • [ ] nvidia driver • enter confirm • esc back • q quit"))
+	b.WriteString(helpStyle.Render("↑↓/jk navigate • enter confirm • esc back • q quit"))
 	return b.String()
 }
 
@@ -782,10 +784,10 @@ func (m *Model) viewSysext() string {
 	}
 	fmt.Fprintf(&b, "System Extensions — %d selected\n\n", selectedCount)
 
-	// Show GPU auto-detection notice if applicable.
+	// Brief GPU notice — full configuration is on the dedicated GPU Setup screen.
 	if m.Wizard.State.NvidiaGPUDetected {
 		gpuStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("76"))
-		b.WriteString(gpuStyle.Render("  ✓ NVIDIA GPU detected — nvidia-runtime auto-selected") + "\n\n")
+		b.WriteString(gpuStyle.Render("  ✓ NVIDIA GPU detected — nvidia-runtime auto-selected · configure on next screen") + "\n\n")
 	}
 
 	if len(m.Wizard.State.Sysexts) == 0 {
@@ -908,20 +910,6 @@ func (m *Model) renderDetailPanel(ext model.SysextEntry) string {
 	lines = append(lines, "")
 	lines = append(lines, wordWrap(longDesc, contentWidth)...)
 
-	// For nvidia-runtime, show the kernel driver version picker.
-	if ext.Name == "nvidia-runtime" && ext.Selected {
-		lines = append(lines, "")
-		lines = append(lines, "KERNEL DRIVER SERIES  ([ / ] to change):")
-		currentDriver := m.Wizard.State.Config.NvidiaDriverVersion
-		for _, opt := range model.NvidiaDriverOptions {
-			marker := "  "
-			if opt.ID == currentDriver {
-				marker = "> "
-			}
-			lines = append(lines, wordWrap(marker+opt.Label, contentWidth)...)
-		}
-	}
-
 	if len(caveats) > 0 {
 		lines = append(lines, "")
 		for _, c := range caveats {
@@ -951,22 +939,77 @@ func (m *Model) renderDetailPanel(ext model.SysextEntry) string {
 	return b.String()
 }
 
-// cycleNvidiaDriverVersion advances the selected NVIDIA kernel driver series by delta (+1 or -1).
-func (m *Model) cycleNvidiaDriverVersion(delta int) {
-	opts := model.NvidiaDriverOptions
-	if len(opts) == 0 {
-		return
-	}
-	current := m.Wizard.State.Config.NvidiaDriverVersion
-	idx := 0
-	for i, opt := range opts {
-		if opt.ID == current {
-			idx = i
-			break
+// viewNvidia renders the dedicated GPU Setup screen.
+// Only reached when nvidia-runtime is selected in the sysext step.
+// Full-width design: GPU detection status, two-component explanation, driver series picker.
+func (m *Model) viewNvidia() string {
+	var b strings.Builder
+
+	headStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("170")).Bold(true)
+	okStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("76")).Bold(true)
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+
+	sep := sepStyle.Render(strings.Repeat("─", 62))
+
+	b.WriteString(headStyle.Render("NVIDIA GPU Setup") + "\n\n")
+
+	// —— GPU detection status ——
+	if m.Wizard.State.NvidiaGPUDetected {
+		b.WriteString(okStyle.Render("  ✓ NVIDIA GPU detected on this machine") + "\n")
+		for _, gpu := range m.Wizard.State.NvidiaGPUs {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("    %s  ·  class %s", gpu.PCIAddress, gpu.PCIClass)) + "\n")
 		}
+	} else {
+		b.WriteString(warnStyle.Render("  ⚠ No NVIDIA GPU detected — continuing at your request") + "\n")
 	}
-	idx = (idx + delta + len(opts)) % len(opts)
-	m.Wizard.State.Config.NvidiaDriverVersion = opts[idx].ID
+	b.WriteString("\n")
+
+	// —— Two-component explanation ——
+	b.WriteString("  knuckle will configure two components at first boot:\n\n")
+
+	b.WriteString(accent.Render("  ① Flatcar-official signed kernel driver") + "\n")
+	b.WriteString(dimStyle.Render("    Source:  Flatcar release — built and signed per Flatcar kernel version") + "\n")
+	b.WriteString(dimStyle.Render("    Action:  knuckle writes /etc/flatcar/enabled-sysext.conf → auto-activates at first boot") + "\n")
+	b.WriteString(dimStyle.Render("    Note:    Works with Secure Boot — no source compilation needed") + "\n\n")
+
+	b.WriteString(accent.Render("  ② NVIDIA Container Toolkit  (nvidia-runtime from Flatcar Bakery)") + "\n")
+	b.WriteString(dimStyle.Render("    Ships:   nvidia-container-runtime · nvidia-ctk · libnvidia-container") + "\n")
+	b.WriteString(dimStyle.Render("    Enables: GPU access inside Docker/containerd containers") + "\n")
+	b.WriteString(dimStyle.Render("    CUDA:    comes from your container images — not installed on the host") + "\n\n")
+
+	b.WriteString(sep + "\n")
+	b.WriteString("\n  Select kernel driver series:\n\n")
+
+	// —— Driver series picker ——
+	for i, opt := range model.NvidiaDriverOptions {
+		cursor := "    "
+		if i == m.cursor {
+			cursor = "  ▸ "
+		}
+
+		recommTag := ""
+		if opt.Recommended {
+			recommTag = "  " + okStyle.Render("[recommended]")
+		}
+
+		labelLine := fmt.Sprintf("%s%s%s", cursor, opt.Label, recommTag)
+		if i == m.cursor {
+			b.WriteString(selectedStyle.Render(cursor+opt.Label) + recommTag + "\n")
+			// Show description on the selected row.
+			if opt.Description != "" {
+				b.WriteString(dimStyle.Render("        "+opt.Description) + "\n")
+			}
+		} else {
+			_ = labelLine
+			b.WriteString(cursor + opt.Label + "\n")
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
 }
 
 // wordWrap splits s into lines of at most width runes, breaking on word boundaries.

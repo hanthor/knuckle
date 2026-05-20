@@ -386,8 +386,8 @@ func TestIsFirstAndLastStep(t *testing.T) {
 
 func TestStepCount(t *testing.T) {
 	count := StepCount()
-	if count != 9 {
-		t.Errorf("expected 9 steps, got %d", count)
+	if count != 10 {
+		t.Errorf("expected 10 steps (added StepNvidia), got %d", count)
 	}
 }
 
