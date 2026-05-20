@@ -14,9 +14,12 @@ import (
 )
 
 const (
-	// DefaultCatalogURL is the GitHub Releases API for the sysext-bakery repo
+	// DefaultCatalogURL is the GitHub Releases API for the sysext-bakery repo.
+	// The bakery spans multiple pages; FetchCatalogArch follows Link headers automatically.
 	DefaultCatalogURL = "https://api.github.com/repos/flatcar/sysext-bakery/releases?per_page=100"
 	defaultTimeout    = 30 * time.Second
+	// maxCatalogPages caps the number of API pages fetched to prevent unbounded loops.
+	maxCatalogPages = 10
 )
 
 // Client is the interface for fetching the sysext catalog
@@ -69,6 +72,11 @@ func (c *HTTPClient) FetchCatalog(ctx context.Context) ([]model.SysextEntry, err
 
 // FetchCatalogArch fetches the catalog and selects assets for the given arch.
 // Flatcar Bakery asset naming: "<name>-<ver>-x86-64.raw" (amd64) and "<name>-<ver>-arm64.raw" (arm64).
+//
+// The GitHub Releases API is paginated — the bakery spans multiple pages. This method
+// follows the Link: <url>; rel="next" response header until all pages are exhausted or
+// maxCatalogPages is reached. Entries are deduplicated by name (first/newest wins).
+// Curated metadata (description, category, support tier) is applied from descriptions.go.
 func (c *HTTPClient) FetchCatalogArch(ctx context.Context, arch string) ([]model.SysextEntry, error) {
 	// Map Go arch name to the suffix used in Flatcar Bakery asset filenames.
 	var assetSuffix string
@@ -80,54 +88,70 @@ func (c *HTTPClient) FetchCatalogArch(ctx context.Context, arch string) ([]model
 	default:
 		return nil, fmt.Errorf("unsupported architecture %q: must be amd64 or arm64", arch)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.CatalogURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "knuckle/1.0")
 
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetching catalog: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("catalog returned status %d", resp.StatusCode)
-	}
-
-	// Limit response body to 5MB to prevent OOM from malicious/broken responses.
-	// If we read exactly maxResponseSize bytes, the response was truncated.
+	// Fetch all pages, following Link headers.
 	const maxResponseSize = 5 << 20
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
-	}
-	if int64(len(body)) >= maxResponseSize {
-		return nil, fmt.Errorf("catalog response exceeds 5MB size limit")
+	var allReleases []githubRelease
+	nextURL := c.CatalogURL
+
+	for page := 0; page < maxCatalogPages && nextURL != ""; page++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating request (page %d): %w", page+1, err)
+		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "knuckle/1.0")
+
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("fetching catalog (page %d): %w", page+1, err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("catalog returned status %d", resp.StatusCode)
+		}
+
+		// Limit each response body to 5MB.
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("reading response (page %d): %w", page+1, err)
+		}
+		if int64(len(body)) >= maxResponseSize {
+			return nil, fmt.Errorf("catalog response exceeds 5MB size limit")
+		}
+
+		var releases []githubRelease
+		if err := json.Unmarshal(body, &releases); err != nil {
+			return nil, fmt.Errorf("parsing catalog JSON (page %d): %w", page+1, err)
+		}
+
+		if len(releases) == 0 {
+			break // empty page — done
+		}
+		allReleases = append(allReleases, releases...)
+
+		// Follow Link: <url>; rel="next" header if present.
+		nextURL, _ = parseLinkNext(resp.Header.Get("Link"))
 	}
 
-	var releases []githubRelease
-	if err := json.Unmarshal(body, &releases); err != nil {
-		return nil, fmt.Errorf("parsing catalog JSON: %w", err)
-	}
-
+	// Build deduplicated entries from all pages.
 	seen := make(map[string]bool)
-	sysexts := make([]model.SysextEntry, 0, len(releases))
+	sysexts := make([]model.SysextEntry, 0, len(allReleases))
 
-	for _, rel := range releases {
+	for _, rel := range allReleases {
 		name, version := ParseTagName(rel.TagName)
 		if name == "" {
 			continue
 		}
 
-		// Deduplicate by name — keep first (latest) since API returns newest first
+		// Deduplicate by name — keep first (latest) since API returns newest first.
 		if seen[name] {
 			continue
 		}
 
-		// Find the asset matching the requested arch suffix
+		// Find the asset matching the requested arch suffix.
 		var downloadURL string
 		for _, asset := range rel.Assets {
 			if strings.Contains(asset.Name, assetSuffix) && strings.HasSuffix(asset.Name, ".raw") {
@@ -141,17 +165,56 @@ func (c *HTTPClient) FetchCatalogArch(ctx context.Context, arch string) ([]model
 
 		seen[name] = true
 
-		desc := truncateDescription(rel.Body, 80)
+		// Start with the GitHub release body (fallback for unknown extensions).
+		description := truncateDescription(rel.Body, 80)
+		category := ""
+		supportTier := ""
+
+		// Override with curated metadata when available.
+		if meta, ok := Lookup(name); ok {
+			if meta.Short != "" {
+				description = meta.Short
+			}
+			category = meta.Category
+			supportTier = meta.SupportTier
+		}
+
 		sysexts = append(sysexts, model.SysextEntry{
 			Name:        name,
-			Description: desc,
+			Description: description,
 			Version:     version,
 			URL:         downloadURL,
+			Category:    category,
+			SupportTier: supportTier,
 			Selected:    false,
 		})
 	}
 
 	return sysexts, nil
+}
+
+// parseLinkNext extracts the "next" page URL from a GitHub API Link response header.
+// Returns ("", false) when there is no next page.
+// Example header: `<https://api.github.com/...?page=2>; rel="next", <...>; rel="last"`
+func parseLinkNext(linkHeader string) (string, bool) {
+	if linkHeader == "" {
+		return "", false
+	}
+	for _, part := range strings.Split(linkHeader, ",") {
+		part = strings.TrimSpace(part)
+		segments := strings.Split(part, ";")
+		if len(segments) < 2 {
+			continue
+		}
+		rawURL := strings.TrimSpace(segments[0])
+		rawURL = strings.Trim(rawURL, "<>")
+		for _, seg := range segments[1:] {
+			if strings.TrimSpace(seg) == `rel="next"` {
+				return rawURL, true
+			}
+		}
+	}
+	return "", false
 }
 
 // ParseTagName extracts sysext name and version from a release tag.

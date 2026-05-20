@@ -133,6 +133,11 @@ type SysextEntry struct {
 	Version     string
 	URL         string
 	Selected    bool
+	// Category and SupportTier are curated display metadata populated by the bakery
+	// package at fetch time. They are not user-supplied and are excluded from JSON
+	// serialization (they are re-derived from the catalog on every fetch).
+	Category    string `json:"-"` // functional group, e.g. "Container Runtime"
+	SupportTier string `json:"-"` // one of the Tier* constants in internal/bakery
 }
 
 // NetworkInterface represents a discovered network interface.

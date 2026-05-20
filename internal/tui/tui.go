@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/castrojo/knuckle/internal/bakery"
 	"github.com/castrojo/knuckle/internal/github"
 	"github.com/castrojo/knuckle/internal/model"
 	"github.com/castrojo/knuckle/internal/validate"
@@ -745,29 +746,190 @@ func (m *Model) viewStorage() string {
 
 func (m *Model) viewSysext() string {
 	var b strings.Builder
-	b.WriteString("System Extensions (optional)\n\nSpace to toggle, Enter to continue:\n\n")
+
+	// Selected count header.
+	selectedCount := 0
+	for _, ext := range m.Wizard.State.Sysexts {
+		if ext.Selected {
+			selectedCount++
+		}
+	}
+	fmt.Fprintf(&b, "System Extensions — %d selected\n\n", selectedCount)
+
 	if len(m.Wizard.State.Sysexts) == 0 {
-		b.WriteString("No extensions available (catalog fetch may have failed)\n")
+		b.WriteString("  No extensions available (catalog fetch may have failed)\n")
 		return b.String()
 	}
+
+	// Group entry indices by support tier, preserving bakery fetch order within each tier.
+	// m.cursor always indexes Sysexts[] directly (Approach A);
+	// tier section headers are display-only and never part of the cursor index space.
+	tierOrder := []string{bakery.TierIntegrated, bakery.TierMaintained, bakery.TierExperimental}
+	tierMap := map[string][]int{}
+	var otherIndices []int
+
 	for i, ext := range m.Wizard.State.Sysexts {
-		cursor := "  "
-		if i == m.cursor {
-			cursor = "▸ "
+		tier := ext.SupportTier
+		if tier == "" {
+			otherIndices = append(otherIndices, i)
+			continue
 		}
-		check := "[ ]"
-		if ext.Selected {
-			check = "[✓]"
+		tierMap[tier] = append(tierMap[tier], i)
+	}
+
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+
+	renderGroup := func(groupName string, indices []int) {
+		if len(indices) == 0 {
+			return
 		}
-		line := fmt.Sprintf("%s%s %s v%s — %s", cursor, check, ext.Name, ext.Version, ext.Description)
-		if i == m.cursor {
-			b.WriteString(selectedStyle.Render(line))
-		} else {
-			b.WriteString(line)
+		b.WriteString("  " + dimStyle.Render("── "+groupName+" ──") + "\n")
+		for _, idx := range indices {
+			ext := m.Wizard.State.Sysexts[idx]
+
+			cursor := "    "
+			if idx == m.cursor {
+				cursor = "  ▸ "
+			}
+			check := "[ ]"
+			if ext.Selected {
+				check = "[✓]"
+			}
+			version := ext.Version
+			if version != "" {
+				version = "v" + version
+			}
+			cat := ext.Category
+			if cat == "" {
+				cat = "Other"
+			}
+
+			line := fmt.Sprintf("%s%s %-22s %-14s  %s", cursor, check, ext.Name, version, cat)
+			if idx == m.cursor {
+				b.WriteString(selectedStyle.Render(line))
+			} else {
+				b.WriteString(line)
+			}
+			b.WriteString("\n")
+
+			// Detail panel — only for the cursor item.
+			if idx == m.cursor {
+				b.WriteString(m.renderDetailPanel(ext))
+			}
 		}
 		b.WriteString("\n")
 	}
+
+	for _, tierName := range tierOrder {
+		renderGroup(tierName, tierMap[tierName])
+	}
+	if len(otherIndices) > 0 {
+		renderGroup("Other", otherIndices)
+	}
+
 	return b.String()
+}
+
+// renderDetailPanel renders the expandable info box for the highlighted sysext entry.
+// Uses m.width for terminal-width-aware sizing; returns empty string when terminal is too narrow.
+func (m *Model) renderDetailPanel(ext model.SysextEntry) string {
+	effectiveWidth := m.width
+	if effectiveWidth == 0 {
+		effectiveWidth = 80
+	}
+	if effectiveWidth < 60 {
+		return ""
+	}
+
+	// Content width: terminal width minus 8-space indent and 4 border chars (│ ... │).
+	panelWidth := min(52, effectiveWidth-32)
+	if panelWidth < 20 {
+		return ""
+	}
+
+	// Resolve long description and caveats from the curated catalog.
+	longDesc := ext.Description
+	caveats := bakery.CaveatsFor(ext.Name)
+	if meta, ok := bakery.Lookup(ext.Name); ok && meta.Long != "" {
+		longDesc = meta.Long
+	}
+
+	cat := ext.Category
+	if cat == "" {
+		cat = "Other"
+	}
+	tier := ext.SupportTier
+	if tier == "" {
+		tier = "Unknown"
+	}
+	version := ext.Version
+	if version == "" {
+		version = "unknown"
+	}
+
+	contentWidth := panelWidth - 2 // subtract the "│ " and " │" borders
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("Version:  %s", version))
+	lines = append(lines, fmt.Sprintf("Category: %s", cat))
+	lines = append(lines, fmt.Sprintf("Support:  %s", tier))
+	lines = append(lines, "")
+	lines = append(lines, wordWrap(longDesc, contentWidth)...)
+	if len(caveats) > 0 {
+		lines = append(lines, "")
+		for _, c := range caveats {
+			lines = append(lines, wordWrap("! "+c, contentWidth)...)
+		}
+	}
+
+	indent := "        " // 8 spaces
+	border := strings.Repeat("─", panelWidth)
+	top := "┌" + border + "┐"
+	bottom := "└" + border + "┘"
+
+	var b strings.Builder
+	b.WriteString(indent + top + "\n")
+	for _, line := range lines {
+		// Truncate to content width using rune count to handle multi-byte chars.
+		runes := []rune(line)
+		if len(runes) > contentWidth {
+			runes = runes[:contentWidth]
+			line = string(runes)
+		}
+		padding := strings.Repeat(" ", contentWidth-len(runes))
+		b.WriteString(indent + "│ " + line + padding + " │\n")
+	}
+	b.WriteString(indent + bottom + "\n")
+
+	return b.String()
+}
+
+// wordWrap splits s into lines of at most width runes, breaking on word boundaries.
+func wordWrap(s string, width int) []string {
+	if width <= 0 || s == "" {
+		return []string{s}
+	}
+	var lines []string
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	current := ""
+	for _, word := range words {
+		wRunes := []rune(word)
+		if current == "" {
+			current = word
+		} else if len([]rune(current))+1+len(wRunes) <= width {
+			current += " " + word
+		} else {
+			lines = append(lines, current)
+			current = word
+		}
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return lines
 }
 
 func (m *Model) viewUpdate() string {

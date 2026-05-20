@@ -279,3 +279,132 @@ func TestDoneViewDryRun(t *testing.T) {
 		t.Error("done view should not mention reboot in dry-run mode")
 	}
 }
+
+func TestViewSysextEmpty(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.Sysexts = nil
+	m := New(w)
+	view := m.View()
+	if !strings.Contains(view, "No extensions available") {
+		t.Errorf("empty sysext view should show 'No extensions available', got: %q", view)
+	}
+}
+
+func TestViewSysextWithEntries(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "kubernetes", Version: "1.36.1", Description: "K8s", Category: "Orchestration", SupportTier: "Flatcar Integrated", URL: "https://example.com/k8s.raw"},
+		{Name: "docker", Version: "28.0.0", Description: "Docker", Category: "Container Runtime", SupportTier: "Flatcar Integrated", URL: "https://example.com/docker.raw"},
+		{Name: "btop", Version: "1.4.0", Description: "btop monitor", Category: "Utilities", SupportTier: "Bakery Maintained", URL: "https://example.com/btop.raw"},
+	}
+	m := New(w)
+	view := m.View()
+
+	// Version must be visible in the list row.
+	if !strings.Contains(view, "v1.36.1") {
+		t.Error("version v1.36.1 should appear in sysext list row")
+	}
+	if !strings.Contains(view, "v28.0.0") {
+		t.Error("version v28.0.0 should appear in sysext list row")
+	}
+
+	// Extension names must be visible.
+	if !strings.Contains(view, "kubernetes") {
+		t.Error("kubernetes should appear in sysext view")
+	}
+	if !strings.Contains(view, "docker") {
+		t.Error("docker should appear in sysext view")
+	}
+	if !strings.Contains(view, "btop") {
+		t.Error("btop should appear in sysext view")
+	}
+
+	// Tier section headers must appear.
+	if !strings.Contains(view, "Flatcar Integrated") {
+		t.Error("tier header 'Flatcar Integrated' should appear in sysext view")
+	}
+	if !strings.Contains(view, "Bakery Maintained") {
+		t.Error("tier header 'Bakery Maintained' should appear in sysext view")
+	}
+
+	// Selected count must appear.
+	if !strings.Contains(view, "0 selected") {
+		t.Error("selected count '0 selected' should appear in header")
+	}
+}
+
+func TestViewSysextSelectedCount(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "docker", Version: "28.0.0", Category: "Container Runtime", SupportTier: "Flatcar Integrated", Selected: true},
+		{Name: "btop", Version: "1.4.0", Category: "Utilities", SupportTier: "Bakery Maintained", Selected: false},
+	}
+	m := New(w)
+	view := m.View()
+	if !strings.Contains(view, "1 selected") {
+		t.Errorf("expected '1 selected' in header, got view: %q", view)
+	}
+}
+
+func TestViewSysextDetailPanelOnCursor(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "ollama", Version: "0.13.2", Description: "Run LLMs locally", Category: "AI / ML", SupportTier: "Bakery Maintained", URL: "https://example.com/ollama.raw"},
+	}
+	m := New(w)
+	m.cursor = 0
+	m.width = 120 // wide enough for panel
+	view := m.View()
+
+	// Detail panel must show version and support tier.
+	if !strings.Contains(view, "Version:") {
+		t.Error("detail panel should show 'Version:' label")
+	}
+	if !strings.Contains(view, "Support:") {
+		t.Error("detail panel should show 'Support:' label")
+	}
+	// Caveat from curated catalog must appear for ollama.
+	if !strings.Contains(view, "publicly accessible") && !strings.Contains(view, "OLLAMA_HOST") {
+		t.Error("ollama detail panel should contain its caveat about public API access")
+	}
+}
+
+func TestViewSysextCursorIndexSafety(t *testing.T) {
+	// Verifies Approach A: m.cursor always indexes Sysexts[] directly.
+	// Space-toggle at cursor must toggle the correct entry regardless of tier grouping.
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "kubernetes", Version: "1.36.1", SupportTier: "Flatcar Integrated"},
+		{Name: "btop", Version: "1.4.0", SupportTier: "Bakery Maintained"},
+		{Name: "wasmtime", Version: "44.0.1", SupportTier: "Experimental"},
+	}
+	m := New(w)
+
+	// cursor=0 → kubernetes; space should toggle kubernetes
+	m.cursor = 0
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	if !w.State.Sysexts[0].Selected {
+		t.Error("space on cursor=0 should select Sysexts[0] (kubernetes)")
+	}
+	if w.State.Sysexts[1].Selected || w.State.Sysexts[2].Selected {
+		t.Error("space on cursor=0 must not affect Sysexts[1] or Sysexts[2]")
+	}
+
+	// cursor=2 → wasmtime (across tier boundary); space should toggle wasmtime
+	m.cursor = 2
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	if !w.State.Sysexts[2].Selected {
+		t.Error("space on cursor=2 should select Sysexts[2] (wasmtime)")
+	}
+	if !w.State.Sysexts[0].Selected {
+		t.Error("Sysexts[0] should still be selected")
+	}
+	if w.State.Sysexts[1].Selected {
+		t.Error("Sysexts[1] should remain unselected")
+	}
+}
