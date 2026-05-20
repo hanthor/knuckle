@@ -48,9 +48,8 @@ just fmt-check    # CI gate: fails if any file is not gofmt-clean
 just vuln         # govulncheck ./...  (auto-installs into $GOBIN)
 just cover        # statement coverage profile → cover.out, prints total
 just cover-check  # per-package coverage threshold gate
-just headless-test       # build + run a canned JSON config with --dry-run (CI gate)
-just vm                  # real install in QEMU VM → auto-boots installed system after
-just vm-dry              # TUI walkthrough only, --dry-run (UI dev only, no real install)
+just headless-test       # build + run a canned JSON config (CI gate, runs on host)
+just vm                  # install in QEMU VM → auto-boots installed system after
 just vm-e2e              # automated: headless install → boot → verify SSH + hostname
 just boot-iso            # build ISO → boot in QEMU GTK window (requires -cpu host; uses bin/knuckle)
 just e2e                 # build ISO → boot in QEMU GTK window → interactive install
@@ -62,9 +61,9 @@ just e2e                 # build ISO → boot in QEMU GTK window → interactive
 
 ## Safety Invariants (do not violate)
 
-1. **Never run real `flatcar-install` on the host.** CI (`just headless-test`)
-   always passes `--dry-run`. Real installs happen only inside QEMU via `just vm`
-   or `just vm-e2e` — never on the host machine.
+1. **Never run real `flatcar-install` on the host.** `just headless-test` runs
+   on the host and only validates config generation — it does not call
+   `flatcar-install`. Real installs run only inside QEMU (`just vm`, `just vm-e2e`).
 2. **All system commands route through `internal/runner`.** No
    `exec.Command` outside `internal/runner`. Reboot is threaded via
    `rebootFn func(context.Context) error` injected from `cmd/knuckle/main.go`.
@@ -159,8 +158,8 @@ tui      ← cmd/knuckle
 | Unit         | `internal/**/_test.go`                 | Pure logic, fixture-driven                          |
 | Golden       | `internal/ignition/testdata/`          | Butane → Ignition output diffs (`-update` rewrites) |
 | Integration  | `//go:build integration` (not in CI)   | Real network: GitHub API, Flatcar release server    |
-| Headless e2e | `just headless-test`                   | Build + canned JSON config + `--dry-run` (CI gate)  |
-| VM real      | `just vm`                              | Real install in QEMU, auto-boots installed system   |
+| Headless e2e | `just headless-test`                   | Build + canned JSON config, runs on host (CI gate)  |
+| VM           | `just vm`                              | Install in QEMU, auto-boots installed system after  |
 | VM automated | `just vm-e2e`                          | Headless install → boot → SSH/hostname verify       |
 | ISO e2e      | `just e2e`                             | Build ISO → boot in QEMU → interactive install      |
 
@@ -242,8 +241,8 @@ injection method for Flatcar PXE live boot.
 6. **Touch `.github/workflows/*.yml`?** Coordinate via PR description — these
    are security-sensitive. CodeQL + Scorecard run on every push.
 7. **Adding a new external command?** Wire it through `runner.Runner`. Period.
-8. **Adding a new disk-touching code path?** Default behavior under `--dry-run`
-   must be a no-op. Add a `DryRunner` stub assertion in tests.
+8. **Adding a new disk-touching code path?** Test it in QEMU via `just vm` or
+   `just vm-e2e`. Unit tests use `SpyRunner` to assert commands without execution.
 
 ### Subagent dispatch
 

@@ -8,8 +8,7 @@ default:
     @just --list
     @echo ""
     @echo "Quickstart:"
-    @echo "  just vm        — real install in a VM, auto-boots installed system after"
-    @echo "  just vm-dry    — TUI walkthrough only, no real install (UI dev)"
+    @echo "  just vm        — install in a VM, boots into installed system after"
     @echo "  just vm-e2e    — automated: headless install → boot → verify SSH"
     @echo "  just e2e       — full end-to-end: build ISO → boot → install → verify"
 
@@ -169,35 +168,6 @@ vm:
     fi
     exec ssh -t {{SSH_OPTS}} -p 2222 core@127.0.0.1
 
-# TUI walkthrough with --dry-run (no real install — for UI development only)
-vm-dry:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just build
-    just _ensure-base
-    just _kill-vm
-
-    rm -f .vm/boot.qcow2 .vm/target.qcow2
-    qemu-img create -f qcow2 -b "$(pwd)/.vm/flatcar_base.img" -F qcow2 .vm/boot.qcow2 >/dev/null
-    qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
-    just _write-ignition
-
-    {{QEMU}} \
-        -m 2048 -smp 2 -enable-kvm \
-        -drive if=virtio,file=.vm/boot.qcow2,format=qcow2 \
-        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
-        -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/config.ign \
-        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
-        -display none -daemonize -pidfile .vm/qemu.pid
-
-    echo "Waiting for VM..."
-    for i in $(seq 1 20); do
-        ssh {{SSH_OPTS}} -o ConnectTimeout=2 -p 2222 core@127.0.0.1 true 2>/dev/null && break
-        sleep 2
-    done
-
-    scp {{SSH_OPTS}} -P 2222 bin/knuckle core@127.0.0.1:/tmp/knuckle 2>/dev/null
-    exec ssh -t {{SSH_OPTS}} -p 2222 core@127.0.0.1 "sudo /tmp/knuckle --dry-run --log-file /tmp/knuckle.log"
 
 
 # Automated E2E: real headless install → boot installed system → verify SSH + hostname
