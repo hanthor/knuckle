@@ -50,7 +50,8 @@ just cover        # statement coverage profile → cover.out, prints total
 just cover-check  # per-package coverage threshold gate
 just headless-test       # build + run a canned JSON config with --dry-run
 just vm                  # boot QEMU + run TUI over SSH (dry-run by default)
-just e2e                 # build ISO → boot in Ghostty → interactive install
+just boot-iso            # build ISO → boot in QEMU GTK window (requires -cpu host; uses bin/knuckle)
+just e2e                 # build ISO → boot in QEMU GTK window → interactive install
 ```
 
 `just ci` is the pre-push gate. CI re-runs every step in
@@ -62,9 +63,8 @@ just e2e                 # build ISO → boot in Ghostty → interactive install
 1. **Never run real `flatcar-install` on the host.** Use `--dry-run` or QEMU/
    loopback. CI is always `--dry-run`.
 2. **All system commands route through `internal/runner`.** No
-   `exec.Command` outside `internal/runner` except `tea.ExecProcess` for the
-   post-install reboot in `internal/tui` (Bubble Tea pattern; documented in
-   `docs/REVIEW-2026-05-19.md` as a known seam to tighten).
+   `exec.Command` outside `internal/runner`. Reboot is threaded via
+   `rebootFn func(context.Context) error` injected from `cmd/knuckle/main.go`.
 3. **Disk identity is `/dev/disk/by-id`.** Display model, serial, size,
    transport, removable flag. Never trust `/dev/sdX` enumeration order.
 4. **Never log to stdout.** Bubble Tea owns it. Use `log/slog` with a file
@@ -139,11 +139,10 @@ tui      ← cmd/knuckle
 7. **huh.Form for form steps.** Welcome, Network, User, Review use
    `charmbracelet/huh` with the Dracula theme. Storage, Sysext, Update,
    Install, Done are raw Bubble Tea. Validation via `.Validate()` callbacks.
-8. **Supply-chain signals (display-only today).** SBOM JSON (SPDX) is the
-   primary version source. SHA512 against `.DIGESTS` is verified for the
-   Flatcar SBOM and surfaced in the channel screen. GPG-signed digest
-   *presence* is checked; full GPG verification is on the roadmap (tracked in
-   `docs/SECURITY.md`).
+8. **Supply-chain signals.** SBOM JSON (SPDX) is the primary version source.
+   SHA512 against `.DIGESTS` is verified. GPG signature on the digest file is
+   fully verified via `github.com/ProtonMail/go-crypto` against the embedded
+   Flatcar signing key (`internal/bakery/keys/flatcar-signing.asc`).
 9. **Headless mode mirrors the TUI.** `--headless --config <file.json>` drives
    `internal/headless` through the same `internal/install` path. New TUI
    fields must round-trip through the headless config schema.
@@ -206,6 +205,26 @@ just tools          # install / verify pinned tool binaries
 just ci             # full pre-push gate (now includes headless e2e)
 ```
 
+### ISO build internals
+
+The installer ISO modifies Flatcar's `usr.squashfs` directly — the only reliable
+injection method for Flatcar PXE live boot.
+
+- **Flatcar PXE initrd** = cpio with only `etc/` (empty) + `usr.squashfs`. No `/init`
+  in the external cpio; dracut init is embedded in `vmlinuz`. Appended cpio overlays
+  are abandoned at pivot_root — there is no `apply-live-updates.sh` hook.
+- **`squashfs-root/` = `/usr/` in the live system.** So `squashfs-root/bin/knuckle` →
+  `/usr/bin/knuckle`. Place units in `squashfs-root/lib/systemd/system/`.
+- **Binary selection:** `scripts/build-iso.sh` uses `bin/knuckle` (built by `just build`
+  with `CGO_ENABLED=0`). Never use the repo-root binary — it may contain AVX instructions
+  that crash with `trap invalid opcode` in QEMU.
+- **QEMU:** always pass `-cpu host`. Without it, AVX binaries silently crash. `just boot-iso`
+  and `just e2e` both set this. Use `-display gtk` (not `-nographic`) to see the TUI on tty1.
+- **Ignition in QEMU:** pass config via `-fw_cfg name=opt/org.flatcar-linux/config,file=config.ign`.
+  The `ignition.config.data=` kernel cmdline parameter is silently ignored on the QEMU platform.
+- **Build cache:** squashfs is content-addressed on `sha256sum bin/knuckle` — skips repack when
+  binary unchanged.
+
 ### All agents
 
 1. **Read this file, then the issue.** Don't infer scope from a commit subject.
@@ -258,13 +277,12 @@ Individual gates (all exercised by `just ci`):
 - [ ] `just build` — binary compiles
 - [ ] `git status` clean — no untracked files in repo
 - [ ] `grep -rn 'exec\.Command' --include='*.go' --exclude-dir=internal/runner .`
-      → only documented seams (`tui.go` reboot via `tea.ExecProcess`,
-      `cmd/knuckle/main.go` reboot guard) — tracked as blocker B2
+      → zero results (all reboot paths use `rebootFn` injected via runner)
 - [ ] All claims in `README.md` still true
 - [ ] `docs/REVIEW-*.md` reconciled — every blocker fixed or deferred with issue
 
-**Open blockers (must fix before 1.0):** B1 (GPG not verified), B2 (reboot
-bypasses runner), B3 (headless disk path not validated). See `docs/REVIEW-2026-05-19.md`.
+**Blockers status (as of v0.2.1):** B1 (GPG) ✓ CLOSED, B2 (reboot runner) ✓ CLOSED,
+B3 (headless disk path) ✓ CLOSED. No open blockers for 1.0.
 
 The most recent review record is `docs/REVIEW-2026-05-19.md`.
 
