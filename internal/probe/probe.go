@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -215,7 +216,9 @@ func resolveByIDPath(devPath string) string {
 	byIDDir := "/dev/disk/by-id/"
 	entries, err := os.ReadDir(byIDDir)
 	if err != nil {
-		return devPath // fallback to raw device path
+		slog.Warn("disk identity fallback: /dev/disk/by-id resolution failed, using raw device path",
+			"device", devPath, "reason", "directory unreadable", "error", err)
+		return devPath
 	}
 	for _, entry := range entries {
 		link := filepath.Join(byIDDir, entry.Name())
@@ -230,6 +233,8 @@ func resolveByIDPath(devPath string) string {
 			return link
 		}
 	}
+	slog.Warn("disk identity fallback: /dev/disk/by-id resolution failed, using raw device path",
+		"device", devPath, "reason", "no matching symlink found")
 	return devPath
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"testing"
 
@@ -146,6 +147,46 @@ func TestResolveByIDPathFallback(t *testing.T) {
 		t.Error("resolveByIDPath() returned empty string, should fallback to devPath")
 	}
 }
+
+func TestResolveByIDPathLogsWarning(t *testing.T) {
+	// Capture slog output to verify warning is emitted on fallback
+	var records []slog.Record
+	handler := &testLogHandler{records: &records}
+	original := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	// Use a path that definitely won't have a by-id symlink
+	got := resolveByIDPath("/dev/nonexistent-test-device")
+	if got != "/dev/nonexistent-test-device" {
+		t.Errorf("resolveByIDPath() = %q, want /dev/nonexistent-test-device", got)
+	}
+
+	// Verify at least one warning was logged
+	var foundWarning bool
+	for _, r := range records {
+		if r.Level == slog.LevelWarn {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Error("resolveByIDPath() did not emit slog.Warn on fallback")
+	}
+}
+
+// testLogHandler captures log records for test assertions.
+type testLogHandler struct {
+	records *[]slog.Record
+}
+
+func (h *testLogHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h *testLogHandler) Handle(_ context.Context, r slog.Record) error {
+	*h.records = append(*h.records, r)
+	return nil
+}
+func (h *testLogHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *testLogHandler) WithGroup(_ string) slog.Handler      { return h }
 
 // GPU detection tests use nvidiaGPUsFromClient with nvpci.InterfaceMock,
 // eliminating the need for fake /sys directories.
