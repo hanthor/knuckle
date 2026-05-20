@@ -24,7 +24,7 @@ off to `flatcar-install` — knuckle never writes partitions itself.
 
 ## v1 Supported Scope
 
-- **Architecture:** x86_64 only (ARM64 is future work)
+- **Architecture:** x86_64 + ARM64 (dual-arch ISOs since v0.4.0)
 - **Storage:** single target disk (no RAID, LVM, LUKS)
 - **Networking:** DHCP + simple static IPv4 only
 - **UI Language:** English only
