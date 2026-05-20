@@ -256,8 +256,7 @@ func Run(ctx context.Context, cfg *Config, installer install.Installer, logger *
 	for i, u := range cfg.Users {
 		if u.GithubUser != "" {
 			fmt.Printf("→ Fetching SSH keys for GitHub user %q...\n", u.GithubUser)
-			// Import inline to avoid circular deps
-			keys, err := fetchGitHubKeys(u.GithubUser)
+			keys, err := fetchGitHubKeys(ctx, u.GithubUser)
 			if err != nil {
 				return fmt.Errorf("fetching GitHub keys for %q: %w", u.GithubUser, err)
 			}
@@ -301,8 +300,12 @@ func Run(ctx context.Context, cfg *Config, installer install.Installer, logger *
 	// Step 6: Reboot
 	if cfg.Reboot && !cfg.DryRun {
 		fmt.Println("→ Rebooting in 3 seconds...")
-		time.Sleep(3 * time.Second)
-		// Reboot is handled by the caller (main.go) since it needs os/exec
+		select {
+		case <-time.After(3 * time.Second):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		// Reboot is handled by the caller (main.go) via the runner abstraction.
 		return nil
 	}
 
@@ -313,7 +316,8 @@ func Run(ctx context.Context, cfg *Config, installer install.Installer, logger *
 	return nil
 }
 
-// fetchGitHubKeys retrieves SSH keys for a GitHub user.
-func fetchGitHubKeys(username string) ([]string, error) {
-	return github.FetchKeys(username)
+// fetchGitHubKeys retrieves SSH keys for a GitHub user, respecting ctx cancellation.
+func fetchGitHubKeys(ctx context.Context, username string) ([]string, error) {
+	client := github.NewClient()
+	return client.FetchKeys(ctx, username)
 }

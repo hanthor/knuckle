@@ -10,6 +10,15 @@ import (
 	"github.com/castrojo/knuckle/internal/model"
 )
 
+// Compiled regex patterns — evaluated once at init to catch malformed patterns early.
+var (
+	reHostname      = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
+	reUsername      = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
+	reTimezone      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_/+-]*$`)
+	reGroupName     = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
+	reInterfaceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+)
+
 // Hostname validates a Linux hostname (RFC 1123).
 // Must be 1-63 characters, alphanumeric plus hyphens, no leading/trailing hyphen, no dots.
 func Hostname(s string) error {
@@ -19,8 +28,7 @@ func Hostname(s string) error {
 	if len(s) > 63 {
 		return fmt.Errorf("hostname too long (max 63 characters)")
 	}
-	matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`, s)
-	if !matched {
+	if !reHostname.MatchString(s) {
 		return fmt.Errorf("invalid hostname %q: must be alphanumeric with optional hyphens, no leading/trailing hyphen", s)
 	}
 	return nil
@@ -92,8 +100,7 @@ func Username(s string) error {
 	if len(s) > 32 {
 		return fmt.Errorf("username too long (max 32 characters)")
 	}
-	matched, _ := regexp.MatchString(`^[a-z_][a-z0-9_-]*$`, s)
-	if !matched {
+	if !reUsername.MatchString(s) {
 		return fmt.Errorf("invalid username: must start with letter or underscore, contain only lowercase alphanumeric, underscore, or hyphen")
 	}
 	return nil
@@ -147,8 +154,7 @@ func Timezone(tz string) error {
 	if tz == "" {
 		return nil // empty is OK, defaults to UTC
 	}
-	matched, _ := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_/+-]*$`, tz)
-	if !matched {
+	if !reTimezone.MatchString(tz) {
 		return fmt.Errorf("invalid timezone %q: must match [A-Za-z_][A-Za-z0-9_/+-]*", tz)
 	}
 	return nil
@@ -159,8 +165,7 @@ func GroupName(name string) error {
 	if name == "" {
 		return fmt.Errorf("group name cannot be empty")
 	}
-	matched, _ := regexp.MatchString(`^[a-z_][a-z0-9_-]*$`, name)
-	if !matched {
+	if !reGroupName.MatchString(name) {
 		return fmt.Errorf("invalid group name %q: must match [a-z_][a-z0-9_-]*", name)
 	}
 	return nil
@@ -220,8 +225,7 @@ func InterfaceName(s string) error {
 	if len(s) > 15 {
 		return fmt.Errorf("interface name too long (max 15 characters)")
 	}
-	matched, _ := regexp.MatchString(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`, s)
-	if !matched {
+	if !reInterfaceName.MatchString(s) {
 		return fmt.Errorf("invalid interface name %q: must contain only alphanumeric, dots, hyphens, or underscores", s)
 	}
 	return nil
