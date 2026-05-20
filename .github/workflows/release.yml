@@ -96,6 +96,8 @@ jobs:
           sudo dpkg --add-architecture arm64
           sudo apt-get update -q
           sudo apt-get install -y systemd-boot-efi:arm64
+          test -f /usr/lib/systemd/boot/efi/systemd-bootaa64.efi \
+            || { echo "ERROR: systemd-bootaa64.efi not found after install"; exit 1; }
 
       - name: Build installer ISO (arm64)
         run: |

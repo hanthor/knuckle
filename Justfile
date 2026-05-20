@@ -392,7 +392,7 @@ vm-e2e:
 
     echo "[1/4] Booting installer VM (static network pass)..."
     {{QEMU}} \
-        -m 4096 -smp 2 -enable-kvm \
+        "${E2E_QEMU_ARGS[@]}" \
         -drive if=virtio,file=.vm/boot.qcow2,format=qcow2 \
         -drive if=virtio,file=.vm/target-static.qcow2,format=qcow2 \
         -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/e2e-installer.ign \
@@ -421,7 +421,7 @@ vm-e2e:
     just _kill-vm
     sleep 1
     {{QEMU}} \
-        -m 2048 -smp 2 -enable-kvm \
+        "${E2E_QEMU_ARGS2[@]}" \
         -drive if=virtio,file=.vm/target-static.qcow2,format=qcow2 \
         -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
         -display none -daemonize -pidfile .vm/qemu.pid \
@@ -480,7 +480,7 @@ vm-e2e:
 
     echo "[1/4] Booting installer VM (sysext pass)..."
     {{QEMU}} \
-        -m 4096 -smp 2 -enable-kvm \
+        "${E2E_QEMU_ARGS[@]}" \
         -drive if=virtio,file=.vm/boot.qcow2,format=qcow2 \
         -drive if=virtio,file=.vm/target-sysext.qcow2,format=qcow2 \
         -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/e2e-installer.ign \
@@ -509,7 +509,7 @@ vm-e2e:
     just _kill-vm
     sleep 1
     {{QEMU}} \
-        -m 2048 -smp 2 -enable-kvm \
+        "${E2E_QEMU_ARGS2[@]}" \
         -drive if=virtio,file=.vm/target-sysext.qcow2,format=qcow2 \
         -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
         -display none -daemonize -pidfile .vm/qemu.pid \
@@ -569,8 +569,17 @@ boot-target:
     [ -f .vm/target.qcow2 ] || { echo "No target disk. Run 'just vm' first."; exit 1; }
     echo "Booting installed target disk..."
     echo "  → Ctrl-a x to quit QEMU"
+    BT_ARGS=(-m 2048 -smp 2)
+    if [[ "{{KNUCKLE_ARCH}}" == "arm64" ]]; then
+        BT_ARGS+=(-M virt -cpu cortex-a57)
+        for candidate in /usr/share/AAVMF/AAVMF_CODE.fd /usr/share/qemu-efi-aarch64/QEMU_EFI.fd; do
+            [ -f "$candidate" ] && BT_ARGS+=(-drive "if=pflash,format=raw,readonly=on,file=$candidate") && break
+        done
+    else
+        BT_ARGS+=(-enable-kvm)
+    fi
     {{QEMU}} \
-        -m 2048 -smp 2 -enable-kvm \
+        "${BT_ARGS[@]}" \
         -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
         -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
         -nographic
@@ -615,18 +624,20 @@ e2e:
     done
     [ -n "$OVMF" ] || { echo "OVMF not found — install ovmf (amd64) or qemu-efi-aarch64 (arm64)"; exit 1; }
 
-    echo "Launching installer VM (UEFI, systemd-boot)..."
+    echo "Launching installer VM (UEFI, systemd-boot, arch={{KNUCKLE_ARCH}})..."
     echo "  → GTK window shows VGA (tty1) — knuckle TUI appears here"
     echo "  → Target disk: .vm/target.qcow2 (20G)"
     echo "  → After install: just boot-target to verify"
     echo ""
 
-    echo "Launching installer VM..."
-    echo "  → GTK window shows VGA console (tty1) where knuckle TUI runs"
-    echo "  → After install: just boot-target"
-    echo ""
+    E2E_ISO_ARGS=(-m 4096 -smp 2)
+    if [[ "{{KNUCKLE_ARCH}}" == "arm64" ]]; then
+        E2E_ISO_ARGS+=(-M virt -cpu cortex-a57)
+    else
+        E2E_ISO_ARGS+=(-enable-kvm -cpu host)
+    fi
     {{QEMU}} \
-        -m 4096 -smp 2 -enable-kvm -cpu host \
+        "${E2E_ISO_ARGS[@]}" \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
         -cdrom "$ISO" \
         -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
