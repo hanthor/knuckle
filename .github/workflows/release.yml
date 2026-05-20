@@ -88,16 +88,25 @@ jobs:
           sha256sum knuckle-linux-arm64 > knuckle-linux-arm64.sha256
 
       - name: Install ISO dependencies (arm64)
-        # systemd-boot-efi on x86_64 only ships the x64 EFI binary.
-        # Adding arm64 architecture gives us systemd-bootaa64.efi for the arm64 ISO.
+        # systemd-boot-efi on x86_64 only ships systemd-bootx64.efi.
+        # We need systemd-bootaa64.efi for the arm64 ISO ESP.
+        # Download the arm64 .deb from ports.ubuntu.com and extract it.
         run: |
           sudo apt-get update
-          sudo apt-get install -y xorriso mtools cpio
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update -q
-          sudo apt-get install -y systemd-boot-efi:arm64
+          sudo apt-get install -y xorriso mtools cpio systemd-boot-efi
+          # Get the version of the installed systemd-boot-efi package
+          VER=$(dpkg-query -W -f='${Version}' systemd-boot-efi)
+          echo "systemd-boot-efi version: $VER"
+          # Download the arm64 variant from ports.ubuntu.com
+          curl -fsSL -o /tmp/systemd-boot-efi_arm64.deb \
+            "https://ports.ubuntu.com/pool/main/s/systemd/systemd-boot-efi_${VER}_arm64.deb"
+          # Extract just the EFI binary
+          dpkg-deb -x /tmp/systemd-boot-efi_arm64.deb /tmp/sdboot-arm64
+          sudo cp /tmp/sdboot-arm64/usr/lib/systemd/boot/efi/systemd-bootaa64.efi \
+            /usr/lib/systemd/boot/efi/systemd-bootaa64.efi
           test -f /usr/lib/systemd/boot/efi/systemd-bootaa64.efi \
-            || { echo "ERROR: systemd-bootaa64.efi not found after install"; exit 1; }
+            || { echo "ERROR: systemd-bootaa64.efi not found"; exit 1; }
+          echo "✓ systemd-bootaa64.efi installed"
 
       - name: Build installer ISO (arm64)
         run: |
