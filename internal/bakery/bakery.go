@@ -210,7 +210,7 @@ func (m *MockClient) FetchCatalogArch(ctx context.Context, arch string) ([]model
 	}
 	var filtered []model.SysextEntry
 	for _, e := range m.Entries {
-		if strings.Contains(e.URL, suffix) || !strings.Contains(e.URL, "x86-64") && !strings.Contains(e.URL, "arm64") {
+		if strings.Contains(e.URL, suffix) || (!strings.Contains(e.URL, "x86-64") && !strings.Contains(e.URL, "arm64")) {
 			filtered = append(filtered, e)
 		}
 	}

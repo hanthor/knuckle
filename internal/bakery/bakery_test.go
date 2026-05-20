@@ -336,6 +336,9 @@ func TestMockClientFetchCatalogArch(t *testing.T) {
 	if names["docker"] {
 		t.Error("arm64 catalog should not contain docker (x86-64 URL)")
 	}
+	if !names["plain"] {
+		t.Error("arm64 catalog should contain plain (no arch suffix in URL)")
+	}
 
 	// error path
 	merr := &bakery.MockClient{Err: errors.New("boom")}

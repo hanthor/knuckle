@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# DEPRECATED: this script is superseded by `just vm-e2e` (arch-aware, covers 3 passes).
+# Left here for historical reference. Hardcoded amd64 throughout.
 # E2E test: install Flatcar via knuckle headless mode, reboot from target, verify
 # Run: just e2e (or ./scripts/e2e-test.sh)
 # Requires: qemu-system-x86_64, KVM, ~2min to run

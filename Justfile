@@ -148,8 +148,22 @@ vm:
     qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
     just _write-ignition
 
+    # Build arch-specific QEMU args
+    QEMU_ARGS=(-m 2048 -smp 2)
+    if [[ "{{KNUCKLE_ARCH}}" == "arm64" ]]; then
+        QEMU_ARGS+=(-M virt -cpu cortex-a57)
+        # AAVMF firmware required for arm64 QEMU
+        AAVMF=""
+        for candidate in /usr/share/AAVMF/AAVMF_CODE.fd /usr/share/qemu-efi-aarch64/QEMU_EFI.fd; do
+            [ -f "$candidate" ] && AAVMF="$candidate" && break
+        done
+        [ -n "$AAVMF" ] && QEMU_ARGS+=(-drive "if=pflash,format=raw,readonly=on,file=$AAVMF")
+        echo "  ⚠ arm64: KVM only available on native arm64 hardware; TCG used otherwise"
+    else
+        QEMU_ARGS+=(-enable-kvm)
+    fi
     {{QEMU}} \
-        -m 2048 -smp 2 -enable-kvm \
+        "${QEMU_ARGS[@]}" \
         -drive if=virtio,file=.vm/boot.qcow2,format=qcow2 \
         -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
         -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/config.ign \
@@ -171,8 +185,15 @@ vm:
     just _kill-vm
     sleep 1
 
+    QEMU_ARGS2=(-m 2048 -smp 2)
+    if [[ "{{KNUCKLE_ARCH}}" == "arm64" ]]; then
+        QEMU_ARGS2+=(-M virt -cpu cortex-a57)
+        [ -n "${AAVMF:-}" ] && QEMU_ARGS2+=(-drive "if=pflash,format=raw,readonly=on,file=$AAVMF")
+    else
+        QEMU_ARGS2+=(-enable-kvm)
+    fi
     {{QEMU}} \
-        -m 2048 -smp 2 -enable-kvm \
+        "${QEMU_ARGS2[@]}" \
         -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
         -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
         -display none -daemonize -pidfile .vm/qemu.pid
@@ -238,8 +259,20 @@ vm-e2e:
 
     # ── Step 1: Boot installer VM ──────────────────────────────────────────
     echo "[1/5] Booting installer VM..."
+    # Build arch-specific QEMU args (arm64 needs -M virt; KVM only on native host)
+    E2E_QEMU_ARGS=(-m 4096 -smp 2)
+    if [[ "{{KNUCKLE_ARCH}}" == "arm64" ]]; then
+        E2E_QEMU_ARGS+=(-M virt -cpu cortex-a57)
+        E2E_AAVMF=""
+        for candidate in /usr/share/AAVMF/AAVMF_CODE.fd /usr/share/qemu-efi-aarch64/QEMU_EFI.fd; do
+            [ -f "$candidate" ] && E2E_AAVMF="$candidate" && break
+        done
+        [ -n "$E2E_AAVMF" ] && E2E_QEMU_ARGS+=(-drive "if=pflash,format=raw,readonly=on,file=$E2E_AAVMF")
+    else
+        E2E_QEMU_ARGS+=(-enable-kvm)
+    fi
     {{QEMU}} \
-        -m 4096 -smp 2 -enable-kvm \
+        "${E2E_QEMU_ARGS[@]}" \
         -drive if=virtio,file=.vm/boot.qcow2,format=qcow2 \
         -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
         -fw_cfg name=opt/org.flatcar-linux/config,file=.vm/e2e-installer.ign \
@@ -279,8 +312,15 @@ vm-e2e:
 
     # ── Step 4: Boot installed target ──────────────────────────────────────
     echo "[4/5] Booting installed target disk (first boot, Ignition runs)..."
+    E2E_QEMU_ARGS2=(-m 2048 -smp 2)
+    if [[ "{{KNUCKLE_ARCH}}" == "arm64" ]]; then
+        E2E_QEMU_ARGS2+=(-M virt -cpu cortex-a57)
+        [ -n "${E2E_AAVMF:-}" ] && E2E_QEMU_ARGS2+=(-drive "if=pflash,format=raw,readonly=on,file=$E2E_AAVMF")
+    else
+        E2E_QEMU_ARGS2+=(-enable-kvm)
+    fi
     {{QEMU}} \
-        -m 2048 -smp 2 -enable-kvm \
+        "${E2E_QEMU_ARGS2[@]}" \
         -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
         -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
         -display none -daemonize -pidfile .vm/qemu.pid \
