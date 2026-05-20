@@ -404,13 +404,23 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.Wizard.State.Config.UpdateStrategy.RebootStrategy = strategies[m.cursor]
 		}
 	case model.StepUser:
+		// Collect local keys first so they're always included even without GitHub.
+		localKeys := detectLocalSSHKeys()
+		cfg := &m.Wizard.State.Config
+		if len(localKeys) > 0 {
+			cfg.SSHKeys = mergeKeys(cfg.SSHKeys, localKeys)
+			if len(cfg.Users) > 0 {
+				cfg.Users[0].SSHKeys = mergeKeys(cfg.Users[0].SSHKeys, localKeys)
+			}
+		}
 		// Trigger async GitHub key fetch if username is provided
 		for _, f := range m.fields {
 			if f.key == "github_user" && f.value != "" && !m.fetching {
 				m.fetching = true
-				username := f.value
+				username := strings.TrimPrefix(f.value, "@")
 				return m, func() tea.Msg {
-					keys, err := github.FetchKeys(username)
+					client := github.NewClient()
+					keys, err := client.FetchKeys(context.Background(), username)
 					return fetchKeysMsg{keys: keys, err: err}
 				}
 			}
