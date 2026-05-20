@@ -120,17 +120,21 @@ e2e:
 iso *CHANNEL='stable':
     ./scripts/build-iso.sh {{CHANNEL}}
 
-# Boot ISO in QEMU with UEFI (requires OVMF)
+# Boot ISO in QEMU with UEFI (Ctrl-a x to quit)
 boot-iso:
     #!/usr/bin/env bash
     set -euo pipefail
     ISO="output/knuckle-installer-stable.iso"
     [ -f "$ISO" ] || { echo "No ISO. Run: just iso"; exit 1; }
     just _kill-vm
+    mkdir -p .vm
     [ -f .vm/target.qcow2 ] || qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
     OVMF="/home/linuxbrew/.linuxbrew/Cellar/qemu/11.0.0/share/qemu/edk2-x86_64-code.fd"
     [ -f "$OVMF" ] || { echo "OVMF not found at $OVMF"; exit 1; }
-    echo "Booting ISO (UEFI)... Ctrl-a x to quit"
+    echo "Booting ISO (UEFI)..."
+    echo "  → Ctrl-a x to quit QEMU"
+    echo "  → At EFI shell, type: fs0:\\startup.nsh"
+    echo ""
     {{QEMU}} \
         -m 4096 -smp 2 -enable-kvm \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
@@ -138,6 +142,32 @@ boot-iso:
         -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
         -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
         -nographic
+
+# Boot ISO in background, wait for SSH
+boot-iso-ssh:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ISO="output/knuckle-installer-stable.iso"
+    [ -f "$ISO" ] || { echo "No ISO. Run: just iso"; exit 1; }
+    just _kill-vm
+    mkdir -p .vm
+    [ -f .vm/target.qcow2 ] || qemu-img create -f qcow2 .vm/target.qcow2 20G >/dev/null
+    OVMF="/home/linuxbrew/.linuxbrew/Cellar/qemu/11.0.0/share/qemu/edk2-x86_64-code.fd"
+    [ -f "$OVMF" ] || { echo "OVMF not found at $OVMF"; exit 1; }
+    {{QEMU}} \
+        -m 4096 -smp 2 -enable-kvm \
+        -drive if=pflash,format=raw,readonly=on,file="$OVMF" \
+        -cdrom "$ISO" \
+        -drive if=virtio,file=.vm/target.qcow2,format=qcow2 \
+        -net nic,model=virtio -net user,hostfwd=tcp::2222-:22 \
+        -display none -daemonize -pidfile .vm/qemu.pid
+    echo "Waiting for ISO to boot..."
+    for i in $(seq 1 40); do
+        ssh {{SSH_OPTS}} -o ConnectTimeout=2 -p 2222 core@127.0.0.1 true 2>/dev/null && break
+        sleep 3
+    done
+    echo "VM ready."
+    exec ssh -t {{SSH_OPTS}} -p 2222 core@127.0.0.1
 
 # Stop running VM
 stop:

@@ -25,112 +25,14 @@ jobs:
       - name: Install ISO dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xorriso mtools cpio grub-efi-amd64-bin
+          sudo apt-get install -y xorriso mtools cpio grub-efi-amd64-bin grub2-common
 
       - name: Build installer ISO
         run: |
-          set -euo pipefail
-          CHANNEL=stable
-          BASE_URL="https://stable.release.flatcar-linux.net/amd64-usr/current"
-          BUILD_DIR="$PWD/.iso-build"
-          mkdir -p "$BUILD_DIR"
-
-          echo "Downloading Flatcar PXE artifacts..."
-          curl -sL -o "$BUILD_DIR/vmlinuz" "$BASE_URL/flatcar_production_pxe.vmlinuz"
-          curl -sL -o "$BUILD_DIR/initrd.cpio.gz" "$BASE_URL/flatcar_production_pxe_image.cpio.gz"
-
-          echo "Creating knuckle overlay..."
-          OVERLAY="$BUILD_DIR/overlay"
-          mkdir -p "$OVERLAY/opt" "$OVERLAY/etc/systemd/system/multi-user.target.wants" "$OVERLAY/etc/systemd/system"
-          cp knuckle "$OVERLAY/opt/knuckle"
-          chmod 755 "$OVERLAY/opt/knuckle"
-
-          cat > "$OVERLAY/etc/systemd/system/knuckle-installer.service" <<SVCEOF
-[Unit]
-Description=Knuckle Flatcar Installer
-After=multi-user.target network-online.target
-Wants=network-online.target
-ConditionPathExists=/opt/knuckle
-
-[Service]
-Type=idle
-ExecStart=/opt/knuckle --log-file /tmp/knuckle.log
-StandardInput=tty
-StandardOutput=tty
-TTYPath=/dev/tty1
-TTYReset=yes
-TTYVHangup=yes
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
-
-          ln -sf /etc/systemd/system/knuckle-installer.service \
-              "$OVERLAY/etc/systemd/system/multi-user.target.wants/knuckle-installer.service"
-
-          (cd "$OVERLAY" && find . | cpio -o -H newc 2>/dev/null | gzip > "$BUILD_DIR/overlay.cpio.gz")
-
-          echo "Combining initramfs..."
-          cat "$BUILD_DIR/initrd.cpio.gz" "$BUILD_DIR/overlay.cpio.gz" > "$BUILD_DIR/combined-initrd.img"
-
-          echo "Building GRUB EFI..."
-          cat > "$BUILD_DIR/grub.cfg" <<GRUBEOF
-set timeout=3
-set default=0
-
-menuentry "Knuckle - Install Flatcar Container Linux" {
-    linux /vmlinuz flatcar.autologin=tty1 console=tty0 console=ttyS0
-    initrd /initrd.img
-}
-
-menuentry "Knuckle - Install (serial console)" {
-    linux /vmlinuz flatcar.autologin=ttyS0 console=ttyS0
-    initrd /initrd.img
-}
-GRUBEOF
-
-          grub-mkstandalone \
-              --format=x86_64-efi \
-              --output="$BUILD_DIR/BOOTX64.EFI" \
-              --locales="" \
-              --fonts="" \
-              "boot/grub/grub.cfg=$BUILD_DIR/grub.cfg"
-
-          echo "Building ESP..."
-          INITRD_SIZE=$(stat -c%s "$BUILD_DIR/combined-initrd.img")
-          KERNEL_SIZE=$(stat -c%s "$BUILD_DIR/vmlinuz")
-          GRUB_SIZE=$(stat -c%s "$BUILD_DIR/BOOTX64.EFI")
-          ESP_SIZE_MB=$(( (INITRD_SIZE + KERNEL_SIZE + GRUB_SIZE + 10*1024*1024) / 1024 / 1024 ))
-
-          EFI_IMG="$BUILD_DIR/efi.img"
-          dd if=/dev/zero of="$EFI_IMG" bs=1M count=$ESP_SIZE_MB 2>/dev/null
-          mformat -i "$EFI_IMG" -F ::
-          mmd -i "$EFI_IMG" ::/EFI ::/EFI/BOOT
-          mcopy -i "$EFI_IMG" "$BUILD_DIR/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
-          mcopy -i "$EFI_IMG" "$BUILD_DIR/vmlinuz" ::/vmlinuz
-          mcopy -i "$EFI_IMG" "$BUILD_DIR/combined-initrd.img" ::/initrd.img
-
-          echo "Assembling ISO..."
-          ISO_DIR="$BUILD_DIR/iso-root"
-          mkdir -p "$ISO_DIR"
-          cp "$BUILD_DIR/vmlinuz" "$ISO_DIR/"
-          cp "$BUILD_DIR/combined-initrd.img" "$ISO_DIR/initrd.img"
-          cp "$EFI_IMG" "$ISO_DIR/efi.img"
-
-          xorriso -as mkisofs \
-              -o knuckle-installer-stable.iso \
-              -R -J -joliet-long \
-              -V "KNUCKLE_INSTALL" \
-              -eltorito-alt-boot \
-              -e efi.img \
-              -no-emul-boot \
-              -isohybrid-gpt-basdat \
-              "$ISO_DIR"
-
+          # build-iso.sh uses EFI shell fallback locally; here we patch it to use grub-mkstandalone
+          ./scripts/build-iso-ci.sh
+          cp output/knuckle-installer-stable.iso .
           sha256sum knuckle-installer-stable.iso > knuckle-installer-stable.iso.sha256
-          echo "ISO size: $(du -h knuckle-installer-stable.iso | cut -f1)"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
