@@ -6,7 +6,7 @@ This is also basically [Azure Container Linux (Home Edition)](https://opensource
 
 ## Why
 
-Flatcar is typically provisioned in cloud environments via Ignition configs. Bare-metal installations lack a polished setup experience. Knuckle bridges this gap with an intuitive terminal wizard that generates Ignition configurations and executes the installation.
+Flatcar is typically provisioned in cloud environments via Butane and ignition configs and wraps it in a usable UX. 
 
 ## Status
 
