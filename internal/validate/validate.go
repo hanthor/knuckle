@@ -180,9 +180,10 @@ func CheckConsistency(cfg *model.InstallConfig) error {
 			return fmt.Errorf("static network requires an IP address")
 		}
 	}
-	// Must have at least one auth method
+	// Must have at least one auth method; reject duplicate usernames
 	hasSSH := len(cfg.SSHKeys) > 0
 	hasPassword := false
+	seenUsers := make(map[string]bool)
 	for _, u := range cfg.Users {
 		if len(u.SSHKeys) > 0 {
 			hasSSH = true
@@ -190,6 +191,10 @@ func CheckConsistency(cfg *model.InstallConfig) error {
 		if u.PasswordHash != "" {
 			hasPassword = true
 		}
+		if seenUsers[u.Username] {
+			return fmt.Errorf("duplicate username %q", u.Username)
+		}
+		seenUsers[u.Username] = true
 	}
 	if !hasSSH && !hasPassword {
 		return fmt.Errorf("at least one authentication method required (SSH key or password)")

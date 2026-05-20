@@ -440,6 +440,26 @@ func TestGenerateButaneTimezoneAndSysexts(t *testing.T) {
 	}
 }
 
+func TestGenerateButaneDuplicateUsers(t *testing.T) {
+	// Duplicate usernames must be caught by validate.CheckConsistency before
+	// reaching the generator. This test documents that GenerateButane itself
+	// does not panic — enforcement happens upstream.
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "dup-user-node",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users: []model.UserConfig{
+			{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA key1"}},
+			{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA key2"}},
+		},
+	}
+	output, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("GenerateButane should not error on duplicate usernames (enforcement is upstream): %v", err)
+	}
+	_ = output // caller responsible for deduplication via validate.CheckConsistency
+}
+
 func TestYamlEscapeNewlines(t *testing.T) {
 	g := NewGenerator()
 

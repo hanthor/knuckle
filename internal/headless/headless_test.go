@@ -94,10 +94,11 @@ func TestValidate_ValidStatic(t *testing.T) {
 		Channel:  "beta",
 		Hostname: "node02",
 		Network: NetworkConfig{
-			Mode:    "static",
-			Address: "192.168.1.100/24",
-			Gateway: "192.168.1.1",
-			DNS:     []string{"1.1.1.1"},
+			Mode:      "static",
+			Interface: "eth0",
+			Address:   "192.168.1.100/24",
+			Gateway:   "192.168.1.1",
+			DNS:       []string{"1.1.1.1"},
 		},
 		Users:          []UserConfig{{Username: "admin", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
 		Disk:           "/dev/sda",
@@ -211,6 +212,76 @@ func TestValidate_InvalidStaticNetwork(t *testing.T) {
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error for invalid CIDR")
+	}
+}
+
+func TestValidate_StaticNetworkMissingInterface(t *testing.T) {
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "node02",
+		Network: NetworkConfig{
+			Mode:    "static",
+			Address: "192.168.1.100/24",
+			Gateway: "192.168.1.1",
+			// Interface intentionally omitted
+		},
+		Users: []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:  "/dev/sda",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for static network with empty interface")
+	}
+}
+
+func TestValidate_InvalidNetworkMode(t *testing.T) {
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "node01",
+		Network:  NetworkConfig{Mode: "bonded"},
+		Users:    []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}}},
+		Disk:     "/dev/vdb",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for unrecognised network mode")
+	}
+}
+
+func TestValidate_InvalidIgnitionURL(t *testing.T) {
+	cases := []struct {
+		desc string
+		url  string
+	}{
+		{"no scheme", "example.com/config.ign"},
+		{"ftp scheme", "ftp://example.com/config.ign"},
+		{"bare text", "not-a-url"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			cfg := &Config{
+				Channel:     "stable",
+				Disk:        "/dev/vdb",
+				IgnitionURL: tc.url,
+			}
+			if err := cfg.Validate(); err == nil {
+				t.Errorf("expected error for ignition_url=%q (%s)", tc.url, tc.desc)
+			}
+		})
+	}
+}
+
+func TestValidate_DuplicateUsername(t *testing.T) {
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "node01",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users: []UserConfig{
+			{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz test@test"}},
+			{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz other@host"}},
+		},
+		Disk: "/dev/vdb",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for duplicate username")
 	}
 }
 

@@ -240,7 +240,7 @@ func TestBuildInstallArgs(t *testing.T) {
 			if tt.ignitionJSON != "" {
 				ignPath = "/tmp/test-ign.json"
 			}
-			got := buildInstallArgs(tt.cfg, tt.ignitionJSON, ignPath)
+			got := buildInstallArgs(tt.cfg, ignPath)
 			if len(got) != len(tt.want) {
 				t.Fatalf("buildInstallArgs() = %v, want %v", got, tt.want)
 			}

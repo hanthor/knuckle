@@ -304,6 +304,35 @@ func TestGroupName(t *testing.T) {
 	}
 }
 
+func TestInterfaceName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid eth0", "eth0", false},
+		{"valid ens3", "ens3", false},
+		{"valid with dot", "eth0.100", false},
+		{"valid with hyphen", "veth-abc", false},
+		{"valid with underscore", "bond_0", false},
+		{"valid max length", strings.Repeat("a", 15), false},
+		{"too long", strings.Repeat("a", 16), true},
+		{"empty", "", true},
+		{"starts with dot", ".eth0", true},
+		{"starts with hyphen", "-eth0", true},
+		{"contains space", "eth 0", true},
+		{"contains slash", "eth/0", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := InterfaceName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("InterfaceName(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestCheckConsistency(t *testing.T) {
 	validConfig := func() *model.InstallConfig {
 		return &model.InstallConfig{
@@ -401,6 +430,17 @@ func TestCheckConsistency(t *testing.T) {
 				cfg.Network.Interface = "eth0"
 				cfg.Network.Address = "10.0.0.5/24"
 			},
+		},
+		{
+			name: "duplicate username rejected",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.SSHKeys = nil
+				cfg.Users = []model.UserConfig{
+					{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA"}},
+					{Username: "core", SSHKeys: []string{"ssh-ed25519 BBBB"}},
+				}
+			},
+			wantErr: "duplicate username",
 		},
 	}
 	for _, tt := range tests {

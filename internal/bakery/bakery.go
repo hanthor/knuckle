@@ -79,10 +79,14 @@ func (c *HTTPClient) FetchCatalog(ctx context.Context) ([]model.SysextEntry, err
 	}
 
 	// Limit response body to 5MB to prevent OOM from malicious/broken responses.
+	// If we read exactly maxResponseSize bytes, the response was truncated.
 	const maxResponseSize = 5 << 20
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return nil, fmt.Errorf("reading response: %w", err)
+	}
+	if int64(len(body)) >= maxResponseSize {
+		return nil, fmt.Errorf("catalog response exceeds 5MB size limit")
 	}
 
 	var releases []githubRelease

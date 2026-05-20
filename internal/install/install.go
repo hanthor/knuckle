@@ -43,8 +43,6 @@ func (i *FlatcarInstaller) Install(ctx context.Context, cfg *model.InstallConfig
 		return fmt.Errorf("install config cannot be nil")
 	}
 
-	var ignitionJSON string
-
 	if cfg.IgnitionURL != "" {
 		// External ignition URL mode — pass directly to flatcar-install
 		progress("Using external Ignition config...")
@@ -59,7 +57,7 @@ func (i *FlatcarInstaller) Install(ctx context.Context, cfg *model.InstallConfig
 		// Compile to Ignition JSON via coreos/butane Go library
 		// (butane CLI is not available on Flatcar Container Linux)
 		progress("Compiling Ignition config...")
-		ignitionJSON, err = ignition.CompileToIgnition(butaneYAML)
+		ignitionJSON, err := ignition.CompileToIgnition(butaneYAML)
 		if err != nil {
 			return fmt.Errorf("compiling butane: %w", err)
 		}
@@ -76,7 +74,7 @@ func (i *FlatcarInstaller) Install(ctx context.Context, cfg *model.InstallConfig
 	}
 
 	// Build flatcar-install command args
-	args := buildInstallArgs(cfg, ignitionJSON, i.ignitionPath)
+	args := buildInstallArgs(cfg, i.ignitionPath)
 
 	// Run flatcar-install
 	progress("Running flatcar-install...")
@@ -94,7 +92,7 @@ func (i *FlatcarInstaller) Install(ctx context.Context, cfg *model.InstallConfig
 	return nil
 }
 
-func buildInstallArgs(cfg *model.InstallConfig, ignitionJSON string, ignitionPath string) []string {
+func buildInstallArgs(cfg *model.InstallConfig, ignitionPath string) []string {
 	// Prefer /dev/disk/by-id path for stable identification
 	diskPath := cfg.Disk.Path
 	if diskPath == "" {

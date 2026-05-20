@@ -150,8 +150,19 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Network mode must be recognised
+	if c.Network.Mode != "" && c.Network.Mode != "dhcp" && c.Network.Mode != "static" {
+		return fmt.Errorf("network mode: must be \"dhcp\" or \"static\" (got %q)", c.Network.Mode)
+	}
+
 	// Network (static mode validation)
 	if c.Network.Mode == "static" {
+		if c.Network.Interface == "" {
+			return fmt.Errorf("network: static mode requires interface name")
+		}
+		if err := validate.InterfaceName(c.Network.Interface); err != nil {
+			return fmt.Errorf("network interface: %w", err)
+		}
 		if c.Network.Address == "" {
 			return fmt.Errorf("network: static mode requires address")
 		}
@@ -170,6 +181,13 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// IgnitionURL format
+	if c.IgnitionURL != "" {
+		if err := validate.URL(c.IgnitionURL); err != nil {
+			return fmt.Errorf("ignition_url: %w", err)
+		}
+	}
+
 	// Disk
 	if c.Disk == "" && c.IgnitionURL == "" {
 		return fmt.Errorf("disk: required (specify target disk path)")
@@ -185,6 +203,7 @@ func (c *Config) Validate() error {
 		if len(c.Users) == 0 {
 			return fmt.Errorf("users: at least one user is required")
 		}
+		seen := make(map[string]bool)
 		for i, u := range c.Users {
 			if u.Username == "" {
 				return fmt.Errorf("users[%d]: username is required", i)
@@ -192,6 +211,10 @@ func (c *Config) Validate() error {
 			if err := validate.Username(u.Username); err != nil {
 				return fmt.Errorf("users[%d]: %w", i, err)
 			}
+			if seen[u.Username] {
+				return fmt.Errorf("users[%d]: duplicate username %q", i, u.Username)
+			}
+			seen[u.Username] = true
 			if len(u.SSHKeys) == 0 && u.Password == "" && u.GithubUser == "" {
 				return fmt.Errorf("users[%d] (%s): must have ssh_keys, password, or github_user", i, u.Username)
 			}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/castrojo/knuckle/internal/bakery"
@@ -200,6 +201,28 @@ func TestMockClient(t *testing.T) {
 			t.Errorf("expected %v, got %v", expectedErr, err)
 		}
 	})
+}
+
+func TestFetchCatalogResponseTooLarge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Send more than 5MB — triggers the size limit guard
+		payload := make([]byte, (5<<20)+1)
+		for i := range payload {
+			payload[i] = 'x'
+		}
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	client := bakery.NewHTTPClientWithURL(srv.URL)
+	_, err := client.FetchCatalog(context.Background())
+	if err == nil {
+		t.Fatal("expected error for oversized response, got nil")
+	}
+	if !strings.Contains(err.Error(), "5MB") {
+		t.Errorf("expected size-limit error message, got: %v", err)
+	}
 }
 
 func TestParseTagName(t *testing.T) {
