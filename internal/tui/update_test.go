@@ -1,0 +1,463 @@
+package tui
+
+import (
+	"fmt"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/castrojo/knuckle/internal/model"
+)
+
+func TestUpdate_WindowSizeMsg(t *testing.T) {
+	w := newTestWizard()
+	m := New(w)
+
+	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	tuiModel := newModel.(*Model)
+
+	if tuiModel.width != 120 || tuiModel.height != 40 {
+		t.Errorf("expected 120x40, got %dx%d", tuiModel.width, tuiModel.height)
+	}
+}
+
+func TestUpdate_InstallDoneMsg_Success(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepInstall
+	m := New(w)
+	m.installing = true
+
+	newModel, _ := m.Update(installDoneMsg{err: nil})
+	tuiModel := newModel.(*Model)
+
+	if tuiModel.installing {
+		t.Error("expected installing=false after installDoneMsg")
+	}
+	if tuiModel.Wizard.State.CurrentStep != model.StepDone {
+		t.Errorf("expected StepDone, got %v", tuiModel.Wizard.State.CurrentStep)
+	}
+	if tuiModel.err != nil {
+		t.Errorf("unexpected error: %v", tuiModel.err)
+	}
+}
+
+func TestUpdate_InstallDoneMsg_Error(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepInstall
+	m := New(w)
+	m.installing = true
+
+	newModel, _ := m.Update(installDoneMsg{err: errTest})
+	tuiModel := newModel.(*Model)
+
+	if tuiModel.installing {
+		t.Error("expected installing=false after error")
+	}
+	if tuiModel.err == nil {
+		t.Error("expected error to be set")
+	}
+	// Should NOT advance to Done on error
+	if tuiModel.Wizard.State.CurrentStep != model.StepInstall {
+		t.Errorf("expected to stay on Install step, got %v", tuiModel.Wizard.State.CurrentStep)
+	}
+}
+
+func TestUpdate_FetchKeysMsg_Success(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUser
+	w.State.Config.Channel = "stable"
+	w.State.Config.Hostname = "test"
+	w.State.Config.Disk = model.DiskInfo{DevPath: "/dev/vda"}
+	w.State.Config.Users = []model.UserConfig{{Username: "core"}}
+	w.State.Config.SSHKeys = []string{}
+	m := New(w)
+	m.fetching = true
+
+	keys := []string{"ssh-ed25519 AAAA github@key"}
+	newModel, _ := m.Update(fetchKeysMsg{keys: keys, err: nil})
+	tuiModel := newModel.(*Model)
+
+	if tuiModel.fetching {
+		t.Error("expected fetching=false")
+	}
+	if tuiModel.err != nil {
+		t.Errorf("unexpected error: %v", tuiModel.err)
+	}
+	// Should have advanced past User step
+	if tuiModel.Wizard.State.CurrentStep == model.StepUser {
+		t.Error("expected to advance past User step after key fetch")
+	}
+	// Keys should be applied
+	if len(tuiModel.Wizard.State.Config.Users[0].SSHKeys) == 0 {
+		t.Error("expected SSH keys to be merged into user config")
+	}
+}
+
+func TestUpdate_FetchKeysMsg_Error(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUser
+	m := New(w)
+	m.fetching = true
+
+	newModel, _ := m.Update(fetchKeysMsg{keys: nil, err: errTest})
+	tuiModel := newModel.(*Model)
+
+	if tuiModel.fetching {
+		t.Error("expected fetching=false")
+	}
+	if tuiModel.err == nil {
+		t.Error("expected error to be set")
+	}
+	if tuiModel.Wizard.State.CurrentStep != model.StepUser {
+		t.Errorf("expected to stay on User step, got %v", tuiModel.Wizard.State.CurrentStep)
+	}
+}
+
+func TestUpdate_InstallProgressMsg(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepInstall
+	m := New(w)
+
+	newModel, cmd := m.Update(installProgressMsg("Downloading image..."))
+	tuiModel := newModel.(*Model)
+
+	if len(tuiModel.Wizard.State.ProgressMessages) != 1 {
+		t.Fatalf("expected 1 progress message, got %d", len(tuiModel.Wizard.State.ProgressMessages))
+	}
+	if tuiModel.Wizard.State.ProgressMessages[0] != "Downloading image..." {
+		t.Errorf("expected 'Downloading image...', got %q", tuiModel.Wizard.State.ProgressMessages[0])
+	}
+	if cmd == nil {
+		t.Error("expected cmd (progress animation + wait)")
+	}
+}
+
+func TestUpdate_CtrlA_TogglesAdvancedOnWelcome(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepWelcome
+	m := New(w)
+
+	if m.showAdvanced {
+		t.Error("showAdvanced should start false")
+	}
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	tuiModel := newModel.(*Model)
+	if !tuiModel.showAdvanced {
+		t.Error("expected showAdvanced=true after Ctrl+A")
+	}
+
+	newModel, _ = tuiModel.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	tuiModel = newModel.(*Model)
+	if tuiModel.showAdvanced {
+		t.Error("expected showAdvanced=false after second Ctrl+A")
+	}
+}
+
+func TestUpdate_CtrlA_NoOpOnOtherSteps(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepStorage
+	m := New(w)
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	tuiModel := newModel.(*Model)
+	if tuiModel.showAdvanced {
+		t.Error("Ctrl+A should not toggle advanced on non-Welcome steps")
+	}
+}
+
+func TestMaxCursor(t *testing.T) {
+	tests := []struct {
+		step     model.WizardStep
+		setup    func(m *Model)
+		expected int
+	}{
+		{
+			step:     model.StepWelcome,
+			expected: 4, // stable, lts, beta, alpha
+		},
+		{
+			step: model.StepStorage,
+			setup: func(m *Model) {
+				m.Wizard.State.Disks = []model.DiskInfo{
+					{DevPath: "/dev/vda"},
+					{DevPath: "/dev/sda"},
+				}
+			},
+			expected: 2,
+		},
+		{
+			step: model.StepSysext,
+			setup: func(m *Model) {
+				m.Wizard.State.Sysexts = []model.SysextEntry{
+					{Name: "docker"},
+					{Name: "tailscale"},
+					{Name: "wasmtime"},
+				}
+			},
+			expected: 3,
+		},
+		{
+			step:     model.StepNvidia,
+			expected: len(model.NvidiaDriverOptions),
+		},
+		{
+			step:     model.StepUpdate,
+			expected: 3,
+		},
+		{
+			step:     model.StepNetwork, // default case
+			expected: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.step.String(), func(t *testing.T) {
+			w := newTestWizard()
+			w.State.CurrentStep = tt.step
+			m := New(w)
+			if tt.setup != nil {
+				tt.setup(m)
+			}
+			got := m.maxCursor()
+			if got != tt.expected {
+				t.Errorf("maxCursor() = %d, want %d", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHandleKey_CursorClamp(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUpdate // 3 options
+	m := New(w)
+	m.cursor = 2
+
+	// Press down — should clamp at max-1
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	tuiModel := newModel.(*Model)
+	if tuiModel.cursor != 2 {
+		t.Errorf("cursor should clamp at 2, got %d", tuiModel.cursor)
+	}
+
+	// Press up
+	newModel, _ = tuiModel.Update(tea.KeyMsg{Type: tea.KeyUp})
+	tuiModel = newModel.(*Model)
+	if tuiModel.cursor != 1 {
+		t.Errorf("cursor should be 1 after up, got %d", tuiModel.cursor)
+	}
+}
+
+func TestHandleKey_CursorUp_AtZero(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepStorage
+	w.State.Disks = []model.DiskInfo{{DevPath: "/dev/vda"}}
+	m := New(w)
+	m.cursor = 0
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	tuiModel := newModel.(*Model)
+	if tuiModel.cursor != 0 {
+		t.Errorf("cursor should stay at 0, got %d", tuiModel.cursor)
+	}
+}
+
+func TestHandleKey_SpaceTogglesSysext(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "docker", Selected: false},
+		{Name: "tailscale", Selected: false},
+	}
+	m := New(w)
+	m.cursor = 0
+
+	// Space toggles first sysext
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	tuiModel := newModel.(*Model)
+	if !tuiModel.Wizard.State.Sysexts[0].Selected {
+		t.Error("expected sysext[0] to be selected")
+	}
+
+	// Second space un-toggles
+	newModel, _ = tuiModel.Update(tea.KeyMsg{Type: tea.KeySpace})
+	tuiModel = newModel.(*Model)
+	if tuiModel.Wizard.State.Sysexts[0].Selected {
+		t.Error("expected sysext[0] to be deselected")
+	}
+}
+
+func TestHandleKey_SpaceNvidiaSync(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "nvidia-runtime", Selected: false},
+	}
+	m := New(w)
+	m.cursor = 0
+
+	// Toggle nvidia-runtime ON
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	tuiModel := newModel.(*Model)
+	if tuiModel.Wizard.State.Config.NvidiaDriverVersion == "" {
+		t.Error("expected NvidiaDriverVersion to be set when nvidia-runtime selected")
+	}
+
+	// Toggle nvidia-runtime OFF
+	newModel, _ = tuiModel.Update(tea.KeyMsg{Type: tea.KeySpace})
+	tuiModel = newModel.(*Model)
+	if tuiModel.Wizard.State.Config.NvidiaDriverVersion != "" {
+		t.Error("expected NvidiaDriverVersion cleared when nvidia-runtime deselected")
+	}
+}
+
+// TestHandleKey_CtrlB_TogglesButane tests Ctrl+B on Review step.
+// Review has activeForm, so we nil it to test handleKey directly.
+func TestHandleKey_CtrlB_TogglesButane(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepReview
+	m := New(w)
+	m.activeForm = nil
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	tuiModel := newModel.(*Model)
+	if !tuiModel.showButane {
+		t.Error("expected showButane=true after Ctrl+B on Review")
+	}
+}
+
+func TestHandleKey_Reboot_DryRun(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepDone
+	w.State.Config.DryRun = true
+	m := New(w)
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	tuiModel := newModel.(*Model)
+	if tuiModel.err == nil {
+		t.Error("expected dry-run reboot message")
+	}
+	if tuiModel.quitting {
+		t.Error("should not quit in dry-run reboot")
+	}
+}
+
+// TestHandleKey_Reboot_Confirmation_Direct exercises reboot double-press
+// through handleKey directly. Note: Update() clears confirmReboot before
+// reaching handleKey, making the double-r pattern broken through Update().
+// This is a known bug (filed separately).
+func TestHandleKey_Reboot_Confirmation_Direct(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepDone
+	w.State.Config.DryRun = false
+	m := New(w)
+
+	// First 'r' via handleKey directly
+	newModel, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	tuiModel := newModel.(*Model)
+	if !tuiModel.confirmReboot {
+		t.Error("expected confirmReboot=true after first r")
+	}
+
+	// Second 'r' via handleKey (bypasses Update's clear)
+	newModel, cmd := tuiModel.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	tuiModel = newModel.(*Model)
+	if !tuiModel.quitting {
+		t.Error("expected quitting=true after double r")
+	}
+	if cmd == nil {
+		t.Error("expected quit cmd")
+	}
+}
+
+func TestHandleKey_Backspace_DeletesFieldChar(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNetwork
+	m := New(w)
+	m.activeForm = nil // bypass huh form to test raw field editing
+	m.initStepFields()
+	m.fields[0].value = "eth0"
+	m.fieldIdx = 0
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	tuiModel := newModel.(*Model)
+	if tuiModel.fields[0].value != "eth" {
+		t.Errorf("expected 'eth' after backspace, got %q", tuiModel.fields[0].value)
+	}
+}
+
+func TestHandleKey_CharInput_AppendsToField(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNetwork
+	m := New(w)
+	m.activeForm = nil // bypass huh form to test raw field editing
+	m.initStepFields()
+	m.fields[0].value = "et"
+	m.fieldIdx = 0
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	tuiModel := newModel.(*Model)
+	if tuiModel.fields[0].value != "eth" {
+		t.Errorf("expected 'eth' after typing h, got %q", tuiModel.fields[0].value)
+	}
+}
+
+func TestHandleKey_TabCyclesFields(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNetwork
+	m := New(w)
+	m.activeForm = nil // bypass huh form to test raw field editing
+	m.initStepFields()
+	m.fieldIdx = 0
+
+	// Tab should advance
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	tuiModel := newModel.(*Model)
+	if tuiModel.fieldIdx != 1 {
+		t.Errorf("expected fieldIdx=1, got %d", tuiModel.fieldIdx)
+	}
+
+	// Tab cycles around
+	tuiModel.fieldIdx = len(tuiModel.fields) - 1
+	tuiModel.activeForm = nil // keep bypassed after Update
+	newModel, _ = tuiModel.Update(tea.KeyMsg{Type: tea.KeyTab})
+	tuiModel = newModel.(*Model)
+	if tuiModel.fieldIdx != 0 {
+		t.Errorf("expected fieldIdx=0 (wrap), got %d", tuiModel.fieldIdx)
+	}
+}
+
+func TestHandleKey_ShiftTabReversesCycleFields(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNetwork
+	m := New(w)
+	m.activeForm = nil // bypass huh form to test raw field editing
+	m.initStepFields()
+	m.fieldIdx = 0
+
+	// Shift+Tab wraps to last
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	tuiModel := newModel.(*Model)
+	if tuiModel.fieldIdx != len(tuiModel.fields)-1 {
+		t.Errorf("expected wrap to last field, got %d", tuiModel.fieldIdx)
+	}
+}
+
+func TestHandleKey_EscGoesBack(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	m := New(w)
+	m.err = errTest // set an error to verify it clears
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	tuiModel := newModel.(*Model)
+	if tuiModel.err != nil {
+		t.Error("expected error cleared on Esc")
+	}
+	// Should go back one step
+	if tuiModel.Wizard.State.CurrentStep == model.StepSysext {
+		t.Error("expected to navigate back from Sysext")
+	}
+}
+
+var errTest = fmt.Errorf("test error")

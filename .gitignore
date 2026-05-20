@@ -30,3 +30,4 @@ cover.html
 # ISO build artifacts
 .iso-build/
 output/
+cover_tui.out

@@ -54,7 +54,10 @@ func (m *Model) onFormComplete() tea.Cmd {
 		if err := validate.Channel(cfg.Channel); err != nil {
 			m.err = err
 			m.initForm()
-			return m.activeForm.Init()
+			if m.activeForm != nil {
+				return m.activeForm.Init()
+			}
+			return nil
 		}
 		if cfg.IgnitionURL != "" {
 			m.Wizard.GoToStep(model.StepStorage)

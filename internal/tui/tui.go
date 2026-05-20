@@ -138,7 +138,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.confirmQuit = false
-		m.confirmReboot = false
+		// Only reset confirmReboot when not on Done step or not pressing 'r'
+		if m.Wizard.State.CurrentStep != model.StepDone || msg.String() != "r" {
+			m.confirmReboot = false
+		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
