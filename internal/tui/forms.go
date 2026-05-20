@@ -233,7 +233,7 @@ func (m *Model) renderZenChrome() string {
 	// Logo: spaced letterform in double-line frame
 	b.WriteString(logoLo.Render("\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557"))
 	b.WriteString("\n")
-	b.WriteString(logoLo.Render("\u2551") + "     " + logoHi.Render("K N U C K L E") + "                                       " + logoLo.Render("\u2551"))
+	b.WriteString(logoLo.Render("\u2551") + "     " + logoHi.Render("K N U C K L E") + "                                        " + logoLo.Render("\u2551"))
 	b.WriteString("\n")
 	b.WriteString(logoLo.Render("\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d"))
 	b.WriteString("\n")
