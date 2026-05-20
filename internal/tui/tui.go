@@ -181,8 +181,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		cfg := &m.Wizard.State.Config
-		// Merge GitHub keys with local host keys (deduped)
-		allKeys := mergeKeys(detectLocalSSHKeys(), msg.keys)
+		// Merge GitHub keys with local host keys AND manual keys (deduped)
+		allKeys := mergeKeys(detectLocalSSHKeys(), splitSSHKeys(m.sshKeyInput), msg.keys)
 		cfg.SSHKeys = allKeys
 		if len(cfg.Users) > 0 {
 			cfg.Users[0].SSHKeys = allKeys
@@ -524,6 +524,12 @@ func (m *Model) applyFields() {
 			case "version":
 				cfg.Version = f.value
 			case "ignition_url":
+				if f.value != "" {
+					if err := validate.IgnitionURL(f.value); err != nil {
+						m.err = err
+						return
+					}
+				}
 				cfg.IgnitionURL = f.value
 			}
 		}
@@ -930,19 +936,15 @@ func detectLocalSSHKeys() []string {
 }
 
 // mergeKeys combines two key slices, deduplicating by key content.
-func mergeKeys(a, b []string) []string {
+func mergeKeys(sources ...[]string) []string {
 	seen := make(map[string]bool)
 	var result []string
-	for _, k := range a {
-		if !seen[k] {
-			seen[k] = true
-			result = append(result, k)
-		}
-	}
-	for _, k := range b {
-		if !seen[k] {
-			seen[k] = true
-			result = append(result, k)
+	for _, src := range sources {
+		for _, k := range src {
+			if !seen[k] {
+				seen[k] = true
+				result = append(result, k)
+			}
 		}
 	}
 	return result
