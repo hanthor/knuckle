@@ -68,7 +68,7 @@ jobs:
 
   release-arm64:
     name: Release (arm64)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm64
     needs: release-amd64  # wait for release to exist before uploading
     steps:
       - uses: actions/checkout@v4
@@ -87,26 +87,10 @@ jobs:
             -o knuckle-linux-arm64 ./cmd/knuckle
           sha256sum knuckle-linux-arm64 > knuckle-linux-arm64.sha256
 
-      - name: Install ISO dependencies (arm64)
-        # systemd-boot-efi on x86_64 only ships systemd-bootx64.efi.
-        # We need systemd-bootaa64.efi for the arm64 ISO ESP.
-        # Download the arm64 .deb from ports.ubuntu.com and extract it.
+      - name: Install ISO dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y xorriso mtools cpio systemd-boot-efi
-          # Get the version of the installed systemd-boot-efi package
-          VER=$(dpkg-query -W -f='${Version}' systemd-boot-efi)
-          echo "systemd-boot-efi version: $VER"
-          # Download the arm64 variant from ports.ubuntu.com
-          curl -fsSL -o /tmp/systemd-boot-efi_arm64.deb \
-            "https://ports.ubuntu.com/pool/main/s/systemd/systemd-boot-efi_${VER}_arm64.deb"
-          # Extract just the EFI binary
-          dpkg-deb -x /tmp/systemd-boot-efi_arm64.deb /tmp/sdboot-arm64
-          sudo cp /tmp/sdboot-arm64/usr/lib/systemd/boot/efi/systemd-bootaa64.efi \
-            /usr/lib/systemd/boot/efi/systemd-bootaa64.efi
-          test -f /usr/lib/systemd/boot/efi/systemd-bootaa64.efi \
-            || { echo "ERROR: systemd-bootaa64.efi not found"; exit 1; }
-          echo "✓ systemd-bootaa64.efi installed"
 
       - name: Build installer ISO (arm64)
         run: |
