@@ -35,7 +35,7 @@ Perfect for home servers, NAS builds, k8s cluster setups, you name it. The [Flat
 - **Install step** — progress bar, wipes stale disk signatures, runs `flatcar-install`, then relocates the backup GPT header for larger target disks
 - **Ignition generation** — produces valid Ignition JSON via in-process Butane compilation (Flatcar variant, no CLI dependency)
 - **Headless mode** — `--headless --config <file.json>` for automated installs (CI/CD friendly)
-- **Installer ISO** — UEFI-bootable ISO with systemd-boot (amd64 + arm64)
+- **Installer ISO** — UEFI-bootable ISO with systemd-boot (amd64 + arm64), with `systemd.gpt_auto=0` set in both boot entries to avoid GPT auto-generator hangs when the ISO is written to larger USB media
 - **Config validation** — consistency checks before install
 - **Dry-run mode** — `--dry-run` flag skips all disk writes
 - **Ctrl+C double-press** — confirmation before quitting
