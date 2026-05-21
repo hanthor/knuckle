@@ -21,7 +21,7 @@ This document covers each.
 | Asset                         | Threat                                              | Mitigation                                                                       |
 | ----------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------- |
 | Target disk contents          | Wrong-disk wipe                                     | `/dev/disk/by-id` paths; boot disk auto-filtered in `internal/probe`              |
-| Target disk contents          | TOCTOU between probe and `flatcar-install`          | `flatcar-install` re-probes; knuckle does not pre-format                         |
+| Target disk contents          | Stale signatures / partition tables block install   | `wipefs --all --force` runs on the selected target before `flatcar-install`     |
 | Ignition file (SSH keys, pw)  | World-readable temp file                            | `os.CreateTemp` (O_EXCL) + `chmod 0600` + deferred unlink                        |
 | Sysext download               | Tampered binary in transit                          | TLS via Go stdlib; SHA512 verified for Flatcar SBOM (display-only today)         |
 | Sysext catalog                | Malicious release injected into `flatcar/sysext-bakery` | GitHub Releases API only; *no* signature verification — see Known Gaps          |
