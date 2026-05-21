@@ -1447,3 +1447,28 @@ func TestToInstallConfig_IgnitionURL_PropagatesCorrectly(t *testing.T) {
 		t.Errorf("Disk.DevPath = %q, want /dev/nvme0n1", ic.Disk.DevPath)
 	}
 }
+
+func TestToInstallConfig_PasswordOnlyUser_SetsPasswordHash(t *testing.T) {
+	// Regression test: password-only users must propagate the password
+	// field to model.UserConfig.PasswordHash so that CheckConsistency
+	// sees authentication is present.
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "pw-node",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users:    []UserConfig{{Username: "admin", Password: "$6$rounds=4096$salt$hash"}},
+		Disk:     "/dev/sda",
+	}
+
+	installCfg, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("ToInstallConfig() error: %v", err)
+	}
+
+	if len(installCfg.Users) == 0 {
+		t.Fatal("expected at least one user in install config")
+	}
+	if installCfg.Users[0].PasswordHash == "" {
+		t.Error("BUG: password-only user has empty PasswordHash in InstallConfig — CheckConsistency will reject it")
+	}
+}

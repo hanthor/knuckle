@@ -124,9 +124,10 @@ func (c *Config) ToInstallConfig() (*model.InstallConfig, error) {
 			groups = []string{"sudo", "docker"}
 		}
 		user := model.UserConfig{
-			Username: u.Username,
-			SSHKeys:  u.SSHKeys,
-			Groups:   groups,
+			Username:     u.Username,
+			SSHKeys:      u.SSHKeys,
+			PasswordHash: u.Password,
+			Groups:       groups,
 		}
 		cfg.Users = append(cfg.Users, user)
 		// Collect SSH keys at config level too
