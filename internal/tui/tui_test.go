@@ -6,9 +6,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/castrojo/knuckle/internal/model"
-	"github.com/castrojo/knuckle/internal/probe"
-	"github.com/castrojo/knuckle/internal/wizard"
+	"github.com/projectbluefin/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/probe"
+	"github.com/projectbluefin/knuckle/internal/wizard"
 )
 
 func newTestWizard() *wizard.Wizard {

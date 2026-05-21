@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/castrojo/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/model"
 )
 
 // Compiled regex patterns — evaluated once at init to catch malformed patterns early.

@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/castrojo/knuckle/internal/model"
-	"github.com/castrojo/knuckle/internal/validate"
+	"github.com/projectbluefin/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/validate"
 )
 
 // buildNetworkForm creates the huh form for the Network step.

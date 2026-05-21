@@ -3,7 +3,7 @@ package bakery_test
 import (
 	"testing"
 
-	"github.com/castrojo/knuckle/internal/bakery"
+	"github.com/projectbluefin/knuckle/internal/bakery"
 )
 
 // allKnownExtensions is the authoritative list of 28 Flatcar Bakery extensions.

@@ -7,13 +7,13 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/castrojo/knuckle/internal/bakery"
-	"github.com/castrojo/knuckle/internal/headless"
-	"github.com/castrojo/knuckle/internal/install"
-	"github.com/castrojo/knuckle/internal/probe"
-	"github.com/castrojo/knuckle/internal/runner"
-	"github.com/castrojo/knuckle/internal/tui"
-	"github.com/castrojo/knuckle/internal/wizard"
+	"github.com/projectbluefin/knuckle/internal/bakery"
+	"github.com/projectbluefin/knuckle/internal/headless"
+	"github.com/projectbluefin/knuckle/internal/install"
+	"github.com/projectbluefin/knuckle/internal/probe"
+	"github.com/projectbluefin/knuckle/internal/runner"
+	"github.com/projectbluefin/knuckle/internal/tui"
+	"github.com/projectbluefin/knuckle/internal/wizard"
 )
 
 var (

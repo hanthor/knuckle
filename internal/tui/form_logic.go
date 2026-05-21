@@ -6,9 +6,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/castrojo/knuckle/internal/github"
-	"github.com/castrojo/knuckle/internal/model"
-	"github.com/castrojo/knuckle/internal/validate"
+	"github.com/projectbluefin/knuckle/internal/github"
+	"github.com/projectbluefin/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/validate"
 )
 
 // initForm sets up the huh form for form-based steps.

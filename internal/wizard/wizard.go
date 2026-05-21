@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/castrojo/knuckle/internal/bakery"
-	"github.com/castrojo/knuckle/internal/ignition"
-	"github.com/castrojo/knuckle/internal/install"
-	"github.com/castrojo/knuckle/internal/model"
-	"github.com/castrojo/knuckle/internal/probe"
-	"github.com/castrojo/knuckle/internal/validate"
+	"github.com/projectbluefin/knuckle/internal/bakery"
+	"github.com/projectbluefin/knuckle/internal/ignition"
+	"github.com/projectbluefin/knuckle/internal/install"
+	"github.com/projectbluefin/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/probe"
+	"github.com/projectbluefin/knuckle/internal/validate"
 )
 
 // State holds the complete wizard state

@@ -10,8 +10,8 @@ import (
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvpci"
 
-	"github.com/castrojo/knuckle/internal/model"
-	"github.com/castrojo/knuckle/internal/runner"
+	"github.com/projectbluefin/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/runner"
 )
 
 // Prober is the interface for system hardware discovery

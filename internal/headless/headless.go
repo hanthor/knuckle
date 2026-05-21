@@ -10,11 +10,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/castrojo/knuckle/internal/bakery"
-	"github.com/castrojo/knuckle/internal/github"
-	"github.com/castrojo/knuckle/internal/install"
-	"github.com/castrojo/knuckle/internal/model"
-	"github.com/castrojo/knuckle/internal/validate"
+	"github.com/projectbluefin/knuckle/internal/bakery"
+	"github.com/projectbluefin/knuckle/internal/github"
+	"github.com/projectbluefin/knuckle/internal/install"
+	"github.com/projectbluefin/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/validate"
 )
 
 // Config is the JSON schema for headless install configuration.

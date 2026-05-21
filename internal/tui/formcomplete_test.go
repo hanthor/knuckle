@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/castrojo/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/model"
 )
 
 func TestOnFormComplete_Welcome_InvalidChannel(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/castrojo/knuckle/internal/model"
-	"github.com/castrojo/knuckle/internal/runner"
+	"github.com/projectbluefin/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/runner"
 )
 
 // TestCommandInjectionViaDiskPath verifies that a malicious disk path

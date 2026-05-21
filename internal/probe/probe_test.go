@@ -10,7 +10,7 @@ import (
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvpci"
 
-	"github.com/castrojo/knuckle/internal/runner"
+	"github.com/projectbluefin/knuckle/internal/runner"
 )
 
 func TestListDisks(t *testing.T) {

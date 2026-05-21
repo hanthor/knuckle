@@ -62,7 +62,7 @@ No GPG required. Install [cosign](https://docs.sigstore.dev/cosign/system_config
 cosign verify-blob \
   --bundle knuckle.bundle \
   --certificate-identity-regexp \
-    "https://github.com/castrojo/knuckle/.github/workflows/release.yml@refs/tags/.*" \
+    "https://github.com/projectbluefin/knuckle/.github/workflows/release.yml@refs/tags/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   knuckle
 ```
@@ -136,8 +136,8 @@ updating this section should be blocked.
 
 Security issues should be reported privately:
 
-- GitHub: open a [security advisory](https://github.com/castrojo/knuckle/security/advisories)
-  on `castrojo/knuckle`.
+- GitHub: open a [security advisory](https://github.com/projectbluefin/knuckle/security/advisories)
+  on `projectbluefin/knuckle`.
 - Do **not** open a public issue for a vulnerability.
 
 We will acknowledge within 5 business days. Coordinated disclosure timeline

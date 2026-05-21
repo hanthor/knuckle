@@ -16,7 +16,7 @@ targeting bare-metal deployments. Built in Go on the charm.sh stack (Bubble Tea
 v2, Lip Gloss v2, Huh v2). The wizard assembles an Ignition config and hands
 off to `flatcar-install` — knuckle never writes partitions itself.
 
-- **Module:** `github.com/castrojo/knuckle` (Go 1.26+)
+- **Module:** `github.com/projectbluefin/knuckle` (Go 1.26+)
 - **License:** Apache-2.0
 - **Status:** v0.2.1 released; install → reboot → SSH verified end-to-end in QEMU.
 - **Distribution:** `knuckle` binary + installer ISO produced from
@@ -236,7 +236,7 @@ injection method for Flatcar PXE live boot.
 3. **One PR per issue.** Branch `feat/<slug>` or `fix/<slug>`. Conventional
    commits (`feat:`, `fix:`, `test:`, `refactor:`, `docs:`, `ci:`, `chore:`).
 4. **`just ci` is the gate.** If it fails, fix it; don't push.
-5. **Push to `origin` (castrojo/knuckle) only.** No upstream pushes from
+5. **Push to `origin` (projectbluefin/knuckle) only.** No upstream pushes from
    automation.
 6. **Touch `.github/workflows/*.yml`?** Coordinate via PR description — these
    are security-sensitive. CodeQL + Scorecard run on every push.

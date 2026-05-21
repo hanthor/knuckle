@@ -8,8 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/castrojo/knuckle/internal/bakery"
-	"github.com/castrojo/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/bakery"
+	"github.com/projectbluefin/knuckle/internal/model"
 )
 
 // sysextItem wraps a SysextEntry for the bubbles/list interface.

@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/castrojo/knuckle/internal/ignition"
-	"github.com/castrojo/knuckle/internal/model"
-	"github.com/castrojo/knuckle/internal/runner"
+	"github.com/projectbluefin/knuckle/internal/ignition"
+	"github.com/projectbluefin/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/runner"
 )
 
 // Installer orchestrates the Flatcar installation process.

@@ -11,8 +11,8 @@ import (
 
 	"log/slog"
 
-	"github.com/castrojo/knuckle/internal/bakery"
-	"github.com/castrojo/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/bakery"
+	"github.com/projectbluefin/knuckle/internal/model"
 )
 
 func TestLoadConfig(t *testing.T) {

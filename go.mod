@@ -1,4 +1,4 @@
-module github.com/castrojo/knuckle
+module github.com/projectbluefin/knuckle
 
 go 1.26.2
 

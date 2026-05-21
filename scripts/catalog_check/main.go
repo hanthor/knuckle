@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/castrojo/knuckle/internal/bakery"
+	"github.com/projectbluefin/knuckle/internal/bakery"
 )
 
 func main() {

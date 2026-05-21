@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/castrojo/knuckle/internal/model"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/projectbluefin/knuckle/internal/model"
 )
 
 // TestStorageToUserTransition verifies that advancing from Storage (non-form)

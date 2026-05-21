@@ -5,7 +5,7 @@ A modern, interactive TUI "installer" for [Flatcar Container Linux](https://www.
 Knuckle is a charm.sh form that makes a valid ignition file and passes it to the Flatcat installer. We're just making users not have to use ignition, with an ubuntu-server style install UX. 
 
 This is also basically [Azure Container Linux (Home Edition)](https://opensource.microsoft.com/blog/2026/05/18/from-open-source-to-agentic-systems-microsoft-at-open-source-summit-north-america-2026/). 
-- [Download an ISO](https://github.com/castrojo/knuckle/releases) for ARM or AMD64 and install it.
+- [Download an ISO](https://github.com/projectbluefin/knuckle/releases) for ARM or AMD64 and install it.
 - Follow the installer you'll be left with a pristine upstream install of Flatcar linux
 
 

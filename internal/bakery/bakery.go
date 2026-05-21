@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/castrojo/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/model"
 )
 
 const (

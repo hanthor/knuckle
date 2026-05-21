@@ -16,11 +16,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/castrojo/knuckle/internal/bakery"
-	"github.com/castrojo/knuckle/internal/github"
-	"github.com/castrojo/knuckle/internal/model"
-	"github.com/castrojo/knuckle/internal/validate"
-	"github.com/castrojo/knuckle/internal/wizard"
+	"github.com/projectbluefin/knuckle/internal/bakery"
+	"github.com/projectbluefin/knuckle/internal/github"
+	"github.com/projectbluefin/knuckle/internal/model"
+	"github.com/projectbluefin/knuckle/internal/validate"
+	"github.com/projectbluefin/knuckle/internal/wizard"
 )
 
 var (
