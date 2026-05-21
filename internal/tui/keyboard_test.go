@@ -2,18 +2,19 @@
 // shortcut in the TUI.
 //
 // Organisation:
-//   shift+tab   – global back-nav intercept (before forms)
-//   esc         – back-nav, no-op on first step, filter-clear on sysext
-//   tab / j / down – advance cursor / field
-//   up / k      – retreat cursor / field
-//   enter       – confirm / advance
-//   space       – toggle sysext selection
-//   q           – quit (double-press); char in field mode
-//   r           – reboot on Done (double-press); char in field mode
-//   ctrl+a      – advanced mode toggle (Welcome only)
-//   ctrl+b      – Butane preview toggle (Review only)
-//   /           – sysext filter entry
-//   backspace   – delete last field character
+//
+//	shift+tab   – global back-nav intercept (before forms)
+//	esc         – back-nav, no-op on first step, filter-clear on sysext
+//	tab / j / down – advance cursor / field
+//	up / k      – retreat cursor / field
+//	enter       – confirm / advance
+//	space       – toggle sysext selection
+//	q           – quit (double-press); char in field mode
+//	r           – reboot on Done (double-press); char in field mode
+//	ctrl+a      – advanced mode toggle (Welcome only)
+//	ctrl+b      – Butane preview toggle (Review only)
+//	/           – sysext filter entry
+//	backspace   – delete last field character
 package tui
 
 import (
