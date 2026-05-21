@@ -40,6 +40,7 @@ func NewFlatcarInstaller(r runner.Runner, logger *slog.Logger) *FlatcarInstaller
 // 2. Compile Butane → Ignition JSON via coreos/butane Go library
 // 3. Wipe stale filesystem/partition signatures from the target disk
 // 4. Run flatcar-install with the target disk, channel, and ignition config
+// 5. Relocate the backup GPT header to the end of the target disk
 func (i *FlatcarInstaller) Install(ctx context.Context, cfg *model.InstallConfig, progress func(step string)) error {
 	if cfg == nil {
 		return fmt.Errorf("install config cannot be nil")
@@ -93,6 +94,13 @@ func (i *FlatcarInstaller) Install(ctx context.Context, cfg *model.InstallConfig
 	result, err := i.Runner.Run(ctx, "flatcar-install", args...)
 	if err != nil || (result != nil && result.ExitCode != 0) {
 		return formatFlatcarInstallError(result, err)
+	}
+
+	progress("Repairing GPT backup header...")
+	i.Logger.Info("relocating backup gpt header", "disk", diskPath)
+	repairResult, err := i.Runner.Run(ctx, "sfdisk", "--relocate", "gpt-bak-std", diskPath)
+	if err != nil || (repairResult != nil && repairResult.ExitCode != 0) {
+		return formatCommandError("repairing GPT backup header", repairResult, err)
 	}
 
 	progress("Installation complete!")
