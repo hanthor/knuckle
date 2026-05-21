@@ -223,6 +223,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Intercept shift+tab before huh form — always means "go back a step"
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyShiftTab {
+		if m.Wizard.State.CurrentStep > model.StepWelcome {
+			m.Wizard.Previous()
+			m.err = nil
+			m.cursor = 0
+			m.initStepFields()
+			m.initForm()
+			if m.activeForm != nil {
+				return m, m.activeForm.Init()
+			}
+		}
+		return m, nil
+	}
+
 	// Delegate to huh form if active
 	if m.activeForm != nil {
 		form, cmd := m.activeForm.Update(msg)
@@ -337,7 +352,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case "shift+tab", "up", "k":
+	case "up", "k":
 		if m.Wizard.State.CurrentStep == model.StepSysext && m.sysextListReady {
 			var cmd tea.Cmd
 			m.sysextList, cmd = m.sysextList.Update(msg)

@@ -427,19 +427,30 @@ func TestHandleKey_TabCyclesFields(t *testing.T) {
 	}
 }
 
-func TestHandleKey_ShiftTabReversesCycleFields(t *testing.T) {
+func TestHandleKey_ShiftTabGoesBack(t *testing.T) {
 	w := newTestWizard()
-	w.State.CurrentStep = model.StepNetwork
+	w.State.CurrentStep = model.StepStorage
 	m := New(w)
-	m.activeForm = nil // bypass huh form to test raw field editing
-	m.initStepFields()
-	m.fieldIdx = 0
+	m.activeForm = nil
 
-	// Shift+Tab wraps to last
+	// Shift+Tab goes back to previous step
 	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	tuiModel := newModel.(*Model)
-	if tuiModel.fieldIdx != len(tuiModel.fields)-1 {
-		t.Errorf("expected wrap to last field, got %d", tuiModel.fieldIdx)
+	if tuiModel.Wizard.State.CurrentStep != model.StepNetwork {
+		t.Errorf("expected StepNetwork after shift+tab, got %v", tuiModel.Wizard.State.CurrentStep)
+	}
+}
+
+func TestHandleKey_ShiftTabOnWelcomeIsNoOp(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepWelcome
+	m := New(w)
+	m.activeForm = nil
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	tuiModel := newModel.(*Model)
+	if tuiModel.Wizard.State.CurrentStep != model.StepWelcome {
+		t.Errorf("shift+tab on Welcome should be no-op, got %v", tuiModel.Wizard.State.CurrentStep)
 	}
 }
 
