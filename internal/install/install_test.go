@@ -193,8 +193,8 @@ func TestInstallWipesTargetDiskBeforeFlatcarInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(spy.Calls) < 2 {
-		t.Fatalf("expected at least wipefs and flatcar-install calls, got %v", spy.Calls)
+	if len(spy.Calls) < 3 {
+		t.Fatalf("expected wipefs, flatcar-install, and sfdisk calls, got %v", spy.Calls)
 	}
 	if spy.Calls[0].Name != "wipefs" {
 		t.Fatalf("first command = %q, want wipefs", spy.Calls[0].Name)
@@ -204,6 +204,12 @@ func TestInstallWipesTargetDiskBeforeFlatcarInstall(t *testing.T) {
 	}
 	if spy.Calls[1].Name != "flatcar-install" {
 		t.Fatalf("second command = %q, want flatcar-install", spy.Calls[1].Name)
+	}
+	if spy.Calls[2].Name != "sfdisk" {
+		t.Fatalf("third command = %q, want sfdisk", spy.Calls[2].Name)
+	}
+	if got, want := spy.Calls[2].Args, []string{"--relocate", "gpt-bak-std", "/dev/disk/by-id/ata-test-disk"}; strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("sfdisk args = %v, want %v", got, want)
 	}
 }
 
@@ -230,6 +236,30 @@ func TestInstallWipeFailureStopsBeforeFlatcarInstall(t *testing.T) {
 		if call.Name == "flatcar-install" {
 			t.Fatalf("flatcar-install should not run after wipefs failure: %#v", spy.Calls)
 		}
+	}
+}
+
+func TestInstallGPTRepairFailureStopsAfterFlatcarInstall(t *testing.T) {
+	spy := runner.NewSpyRunner()
+	spy.StubError("sfdisk --relocate gpt-bak-std /dev/sda", fmt.Errorf("permission denied"))
+	installer := NewFlatcarInstaller(spy, testLogger())
+	cfg := &model.InstallConfig{
+		Channel:  "stable",
+		Hostname: "repair-fail-node",
+		Disk:     model.DiskInfo{DevPath: "/dev/sda"},
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA k"}}},
+	}
+
+	err := installer.Install(context.Background(), cfg, func(string) {})
+	if err == nil {
+		t.Fatal("expected error when GPT repair fails")
+	}
+	if !strings.Contains(err.Error(), "repairing GPT backup header") {
+		t.Fatalf("error = %q, want GPT repair context", err)
+	}
+	if len(spy.Calls) < 3 || spy.Calls[1].Name != "flatcar-install" || spy.Calls[2].Name != "sfdisk" {
+		t.Fatalf("unexpected call order: %#v", spy.Calls)
 	}
 }
 
@@ -372,6 +402,7 @@ func TestProgressCallback(t *testing.T) {
 		"Writing Ignition config...",
 		"Wiping target disk signatures...",
 		"Running flatcar-install...",
+		"Repairing GPT backup header...",
 		"Installation complete!",
 	}
 

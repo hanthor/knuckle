@@ -32,7 +32,7 @@ Perfect for home servers, NAS builds, k8s cluster setups, you name it. The [Flat
 - **System extensions** — architecture-aware sysext catalog fetched via TLS from [flatcar/sysext-bakery](https://github.com/flatcar/sysext-bakery) GitHub Releases API (not yet cryptographically verified — see [docs/SECURITY.md](docs/SECURITY.md))
 - **Update strategy** — reboot, off, or etcd-lock options
 - **Review screen** — full Butane YAML preview before install
-- **Install step** — progress bar, wipes stale disk signatures, then wraps `flatcar-install` for disk provisioning
+- **Install step** — progress bar, wipes stale disk signatures, runs `flatcar-install`, then relocates the backup GPT header for larger target disks
 - **Ignition generation** — produces valid Ignition JSON via in-process Butane compilation (Flatcar variant, no CLI dependency)
 - **Headless mode** — `--headless --config <file.json>` for automated installs (CI/CD friendly)
 - **Installer ISO** — UEFI-bootable ISO with systemd-boot (amd64 + arm64)
