@@ -186,7 +186,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fetchKeysMsg:
 		m.fetching = false
 		if msg.err != nil {
-			m.err = msg.err
+			m.err = fmt.Errorf("%w — edit the username and press Enter to retry, or clear it and add an SSH key or password instead", msg.err)
 			return m, nil
 		}
 		cfg := &m.Wizard.State.Config
@@ -195,6 +195,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cfg.SSHKeys = allKeys
 		if len(cfg.Users) > 0 {
 			cfg.Users[0].SSHKeys = allKeys
+		}
+		// Guard: don't advance if we have no authentication method at all.
+		// This catches the case where GitHub returned 0 keys and no other auth is set.
+		hasAuth := len(allKeys) > 0
+		for _, u := range cfg.Users {
+			if u.PasswordHash != "" {
+				hasAuth = true
+				break
+			}
+		}
+		if !hasAuth {
+			m.err = fmt.Errorf("no SSH keys found — add a key manually, set a password, or use a GitHub user with public keys")
+			return m, nil
 		}
 		if err := m.Wizard.Next(); err != nil {
 			m.err = err
@@ -480,7 +493,9 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 				cfg.Users[0].SSHKeys = mergeKeys(cfg.Users[0].SSHKeys, localKeys)
 			}
 		}
-		// Trigger async GitHub key fetch if username is provided
+		// Trigger async GitHub key fetch if username is provided.
+		// If the fetch is triggered we return immediately, so reaching the
+		// auth-check below implies no GitHub fetch was started.
 		for _, f := range m.fields {
 			if f.key == "github_user" && f.value != "" && !m.fetching {
 				m.fetching = true
@@ -491,6 +506,18 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 					return fetchKeysMsg{keys: keys, err: err}
 				}
 			}
+		}
+		// No GitHub fetch was triggered — check we have SOME auth before advancing.
+		hasAuth := len(cfg.SSHKeys) > 0
+		for _, u := range cfg.Users {
+			if u.PasswordHash != "" || len(u.SSHKeys) > 0 {
+				hasAuth = true
+				break
+			}
+		}
+		if !hasAuth {
+			m.err = fmt.Errorf("no authentication configured \u2014 add an SSH key, set a password, or provide a GitHub username with public keys")
+			return m, nil
 		}
 	case model.StepInstall:
 		if !m.installing {
