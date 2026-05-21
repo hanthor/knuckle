@@ -17,6 +17,9 @@ var (
 	reTimezone      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_/+-]*$`)
 	reGroupName     = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 	reInterfaceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+	// Tailscale auth keys: tskey-auth-<id12>-<secret32+>; tskey-client- variant also accepted.
+	// See https://tailscale.com/kb/1085/auth-keys for the format.
+	reTailscaleAuthKey = regexp.MustCompile(`^tskey-(auth|client)-[A-Za-z0-9]{10,}-[A-Za-z0-9]{20,}$`)
 )
 
 // Hostname validates a Linux hostname (RFC 1123).
@@ -259,6 +262,36 @@ func CheckConsistency(cfg *model.InstallConfig) error {
 		}
 	}
 
+	return nil
+}
+
+// TailscaleAuthKey validates a Tailscale auth key (tskey-auth-… or tskey-client-…).
+// Rejects obviously malformed input early — the real check is Tailscale's API at
+// `tailscale up` time, but failing here gives the user immediate feedback in the TUI.
+func TailscaleAuthKey(s string) error {
+	if s == "" {
+		return fmt.Errorf("auth key cannot be empty")
+	}
+	if !reTailscaleAuthKey.MatchString(s) {
+		return fmt.Errorf("auth key must start with %q or %q and contain an id and secret", "tskey-auth-", "tskey-client-")
+	}
+	return nil
+}
+
+// TailscaleRoutes validates a comma-separated list of CIDRs for --advertise-routes.
+func TailscaleRoutes(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return fmt.Errorf("at least one route is required for subnet router mode")
+	}
+	for _, raw := range strings.Split(s, ",") {
+		r := strings.TrimSpace(raw)
+		if r == "" {
+			continue
+		}
+		if err := CIDR(r); err != nil {
+			return fmt.Errorf("route %q: %w", r, err)
+		}
+	}
 	return nil
 }
 
