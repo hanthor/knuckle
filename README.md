@@ -8,6 +8,8 @@ This is also basically [Azure Container Linux (Home Edition)](https://opensource
 - [Download an ISO](https://github.com/castrojo/knuckle/releases) for ARM or AMD64 and install it.
 - Follow the installer you'll be left with a pristine upstream install of Flatcar linux
 
+![knuckle demo](demo/knuckle-demo.gif)
+
 ![img](https://github.com/user-attachments/assets/802bb450-f48c-4186-a1d0-542535124bc5)
 
 ## Why
