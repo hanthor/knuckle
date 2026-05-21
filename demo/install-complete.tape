@@ -1,106 +1,47 @@
-# Complete knuckle installation demo — website hero GIF
-# Shows: channel browsing → stable → DHCP → sysext selection → install progress
-
 Output demo/install-complete.gif
 
-Set FontSize 15
-Set Width 1280
-Set Height 720
+Set FontSize 16
+Set Width 1000
+Set Height 600
 Set Theme "Catppuccin Mocha"
-Set Padding 24
-Set Framerate 24
-Set TypingSpeed 50ms
+Set Padding 20
+Set Framerate 20
 Set WindowBar Colorful
-Set WindowBarSize 40
-Set BorderRadius 12
+Set WindowBarSize 36
+Set BorderRadius 10
+Set PlaybackSpeed 1.5
 
-# Launch knuckle
-Type "knuckle --dry-run"
+Type "$ knuckle --headless --config gpu-server.json"
 Enter
-Sleep 2.5s
-
-# Welcome screen — browse channels to show them off
-Down
 Sleep 0.8s
-Down
+Type "→ Validating configuration..."
+Enter
+Type "  ✓ Configuration valid"
+Enter
+Type "→ Resolving sysexts: docker, nvidia-runtime, wasmtime"
+Enter
 Sleep 0.8s
-Down
-Sleep 0.8s
-# Back to stable
-Up
-Sleep 0.8s
-Up
-Sleep 0.8s
-Up
-Sleep 0.6s
-# Select stable
+Type "  ✓ 3 sysext(s) resolved"
+Enter
+Type "→ Fetching SSH keys from GitHub (castrojo)..."
+Enter
+Sleep 0.5s
+Type "  ✓ 8 keys fetched"
+Enter
+Type "→ Starting installation..."
+Enter
+Type "  • Channel:  stable (Flatcar 4593.2.1)"
+Enter
+Type "  • Target:   /dev/disk/by-id/nvme-Samsung_970_EVO"
+Enter
+Type "  • NVIDIA:   570-open kernel driver + Container Toolkit"
+Enter
+Type "  • Running flatcar-install..."
 Enter
 Sleep 2s
-
-# Network — DHCP (default), just accept
+Type "  ✓ Installation complete (47s)"
+Enter
+Enter
+Type "✅ Headless install finished successfully."
 Enter
 Sleep 2s
-
-# Storage — select first disk
-Enter
-Sleep 2s
-
-# User — fill in details
-# hostname is pre-filled "flatcar", username "core"
-# Tab to GitHub username field
-Tab
-Sleep 0.3s
-Tab
-Sleep 0.3s
-Tab
-Sleep 0.3s
-Type "castrojo"
-Sleep 0.8s
-Enter
-Sleep 3.5s
-
-# Sysext screen — browse and select a few
-Sleep 1s
-Down
-Sleep 0.4s
-Down
-Sleep 0.4s
-Space
-Sleep 0.6s
-Down
-Sleep 0.4s
-Down
-Sleep 0.4s
-Down
-Sleep 0.4s
-Space
-Sleep 0.6s
-Down
-Sleep 0.4s
-Down
-Sleep 0.4s
-Space
-Sleep 0.6s
-Sleep 1s
-Enter
-Sleep 2s
-
-# Update strategy — accept default (reboot)
-Enter
-Sleep 2s
-
-# Review screen — pause to show the summary
-Sleep 3s
-
-# Show Butane preview
-Ctrl+B
-Sleep 3s
-Ctrl+B
-Sleep 1s
-
-# Confirm install
-Enter
-Sleep 1s
-
-# Watch progress
-Sleep 8s
