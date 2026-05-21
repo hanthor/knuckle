@@ -182,15 +182,23 @@ DROPIN
 Description=Knuckle Flatcar Installer
 After=multi-user.target network-online.target
 Wants=network-online.target
-Conflicts=getty@tty1.service
+# Conflict with both VGA getty and serial getty so whichever is active gets
+# stopped before knuckle claims /dev/console.  The kernel's last console=
+# parameter determines which device /dev/console resolves to at runtime.
+Conflicts=getty@tty1.service serial-getty@ttyS0.service
 ConditionPathExists=/usr/bin/knuckle
 
 [Service]
 Type=idle
 ExecStart=/usr/bin/knuckle --log-file /tmp/knuckle.log
-StandardInput=tty
+# tty-force: open /dev/console even if another process briefly holds it.
+StandardInput=tty-force
 StandardOutput=tty
-TTYPath=/dev/tty1
+# /dev/console follows the last console= kernel cmdline parameter:
+#   VGA  boot entry (console=ttyS0 console=tty0)  -> tty0  -> VGA display
+#   serial boot entry (console=ttyS0)              -> ttyS0 -> serial port
+# This single unit therefore works correctly for both boot modes.
+TTYPath=/dev/console
 TTYReset=yes
 TTYVHangup=yes
 Restart=on-failure
@@ -243,8 +251,9 @@ mmd -i "$EFI_IMG" ::/loader ::/loader/entries
 printf 'default knuckle\ntimeout 5\neditor no\n' \
     | mcopy -i "$EFI_IMG" - ::/loader/loader.conf
 
-# Primary entry: VGA + serial console
-printf 'title   Knuckle \xe2\x80\x93 Install Flatcar Container Linux\nlinux   /vmlinuz\ninitrd  /initrd.img\noptions console=tty0 console=ttyS0,115200n8\n' \
+# Primary entry: VGA console (tty0 is listed last so /dev/console -> tty0)
+# Serial output is still mirrored to ttyS0 for diagnostics.
+printf 'title   Knuckle \xe2\x80\x93 Install Flatcar Container Linux\nlinux   /vmlinuz\ninitrd  /initrd.img\noptions console=ttyS0,115200n8 console=tty0\n' \
     | mcopy -i "$EFI_IMG" - ::/loader/entries/knuckle.conf
 
 # Alternate entry: serial only (headless servers)

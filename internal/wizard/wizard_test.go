@@ -1179,3 +1179,688 @@ func TestValidateUser_RejectsRoot(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================
+// Route Tests: end-to-end step-sequence + config-state checks
+// ============================================================
+
+// stepTracker records every step visited in the wizard by calling next()
+// and appending the resulting CurrentStep after each advance.
+type stepTracker struct {
+	visited []model.WizardStep
+}
+
+func (st *stepTracker) record(w *Wizard, t *testing.T, label string) {
+	t.Helper()
+	if err := w.Next(); err != nil {
+		t.Fatalf("%s: Next() returned error: %v", label, err)
+	}
+	st.visited = append(st.visited, w.State.CurrentStep)
+}
+
+func assertStepSequence(t *testing.T, got, want []model.WizardStep) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("step sequence length: got %d (%v), want %d (%v)", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("step[%d]: got %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Route A: Welcome → Network(DHCP) → Storage → User(GitHub keys) →
+//
+//	Sysext(none) → Update → Review → Install → Done
+//
+// ---------------------------------------------------------------------------
+func TestRouteA_DHCP_GitHubKeys_NoSysext(t *testing.T) {
+	w, _, _, inst := newTestWizard()
+	st := &stepTracker{}
+
+	// ── Welcome (valid channel already "stable") ──────────────────────────
+	if w.State.CurrentStep != model.StepWelcome {
+		t.Fatalf("expected StepWelcome, got %v", w.State.CurrentStep)
+	}
+	st.record(w, t, "Welcome→Network")
+	if w.State.CurrentStep != model.StepNetwork {
+		t.Fatalf("after Welcome: expected StepNetwork, got %v", w.State.CurrentStep)
+	}
+
+	// ── Network: DHCP ─────────────────────────────────────────────────────
+	w.State.Config.Network.Mode = model.NetworkDHCP
+	st.record(w, t, "Network→Storage")
+	if w.State.CurrentStep != model.StepStorage {
+		t.Fatalf("after Network: expected StepStorage, got %v", w.State.CurrentStep)
+	}
+
+	// ── Storage: pick disk by-id path ─────────────────────────────────────
+	w.State.Config.Disk = model.DiskInfo{DevPath: "/dev/disk/by-id/ata-SAMSUNG_MZ7LN256HAJQ_S38SNX0J123456"}
+	st.record(w, t, "Storage→User")
+	if w.State.CurrentStep != model.StepUser {
+		t.Fatalf("after Storage: expected StepUser, got %v", w.State.CurrentStep)
+	}
+	// Config: disk must be persisted
+	if w.State.Config.Disk.DevPath == "" {
+		t.Error("Disk.DevPath not persisted after Storage step")
+	}
+
+	// ── User: GitHub SSH keys (no password) ───────────────────────────────
+	w.State.Config.Hostname = "flatcar-a"
+	w.State.Config.Users = []model.UserConfig{
+		{
+			Username: "core",
+			SSHKeys: []string{
+				"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGithubKey1 user@laptop",
+				"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGithubKey2 user@desktop",
+			},
+		},
+	}
+	st.record(w, t, "User→Sysext")
+	if w.State.CurrentStep != model.StepSysext {
+		t.Fatalf("after User: expected StepSysext, got %v", w.State.CurrentStep)
+	}
+	// Config: hostname + user persisted
+	if w.State.Config.Hostname != "flatcar-a" {
+		t.Errorf("Hostname not persisted: got %q", w.State.Config.Hostname)
+	}
+	if len(w.State.Config.Users[0].SSHKeys) != 2 {
+		t.Errorf("expected 2 SSH keys, got %d", len(w.State.Config.Users[0].SSHKeys))
+	}
+
+	// ── Sysext: none selected ─────────────────────────────────────────────
+	// Nvidia must be skipped since nvidia-runtime is not selected
+	st.record(w, t, "Sysext→Update(skip nvidia)")
+	if w.State.CurrentStep != model.StepUpdate {
+		t.Fatalf("after Sysext (no nvidia): expected StepUpdate, got %v", w.State.CurrentStep)
+	}
+
+	// ── Update: default reboot strategy already set ───────────────────────
+	if w.State.Config.UpdateStrategy.RebootStrategy != "reboot" {
+		t.Errorf("expected default reboot strategy, got %q", w.State.Config.UpdateStrategy.RebootStrategy)
+	}
+	st.record(w, t, "Update→Review")
+	if w.State.CurrentStep != model.StepReview {
+		t.Fatalf("after Update: expected StepReview, got %v", w.State.CurrentStep)
+	}
+
+	// ── Review: CheckConsistency must pass ────────────────────────────────
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("Review validation failed: %v", err)
+	}
+	st.record(w, t, "Review→Install")
+	if w.State.CurrentStep != model.StepInstall {
+		t.Fatalf("after Review: expected StepInstall, got %v", w.State.CurrentStep)
+	}
+
+	// ── Install → Done ────────────────────────────────────────────────────
+	st.record(w, t, "Install→Done")
+	if w.State.CurrentStep != model.StepDone {
+		t.Fatalf("after Install: expected StepDone, got %v", w.State.CurrentStep)
+	}
+
+	// ── Verify exact step sequence ────────────────────────────────────────
+	assertStepSequence(t, st.visited, []model.WizardStep{
+		model.StepNetwork,
+		model.StepStorage,
+		model.StepUser,
+		model.StepSysext,
+		model.StepUpdate, // StepNvidia skipped
+		model.StepReview,
+		model.StepInstall,
+		model.StepDone,
+	})
+
+	// ── Execute and verify final InstallConfig ────────────────────────────
+	if err := w.Execute(context.Background()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !inst.called {
+		t.Fatal("installer was not called")
+	}
+	cfg := inst.cfg
+	if cfg.Channel != "stable" {
+		t.Errorf("final channel: got %q, want stable", cfg.Channel)
+	}
+	if cfg.Network.Mode != model.NetworkDHCP {
+		t.Errorf("final network mode: got %v, want DHCP", cfg.Network.Mode)
+	}
+	if cfg.Disk.DevPath != "/dev/disk/by-id/ata-SAMSUNG_MZ7LN256HAJQ_S38SNX0J123456" {
+		t.Errorf("final disk: got %q", cfg.Disk.DevPath)
+	}
+	if cfg.Hostname != "flatcar-a" {
+		t.Errorf("final hostname: got %q", cfg.Hostname)
+	}
+	if len(cfg.Users) != 1 || cfg.Users[0].Username != "core" {
+		t.Errorf("final users: %+v", cfg.Users)
+	}
+	if len(cfg.Users[0].SSHKeys) != 2 {
+		t.Errorf("final SSH key count: got %d, want 2", len(cfg.Users[0].SSHKeys))
+	}
+	if cfg.NvidiaDriverVersion != "" {
+		t.Errorf("no nvidia expected, got driver version %q", cfg.NvidiaDriverVersion)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Route B: Welcome → Network(Static) → Storage → User(password) →
+//
+//	Sysext(docker) → Update → Review → Install → Done
+//
+// ---------------------------------------------------------------------------
+func TestRouteB_StaticNetwork_PasswordUser_DockerSysext(t *testing.T) {
+	w, _, _, inst := newTestWizard()
+	st := &stepTracker{}
+
+	// ── Welcome ───────────────────────────────────────────────────────────
+	w.State.Config.Channel = "beta"
+	st.record(w, t, "Welcome→Network")
+
+	// ── Network: static ───────────────────────────────────────────────────
+	w.State.Config.Network = model.NetworkConfig{
+		Mode:      model.NetworkStatic,
+		Interface: "enp3s0",
+		Address:   "192.168.100.50/24",
+		Gateway:   "192.168.100.1",
+		DNS:       []string{"1.1.1.1", "8.8.8.8"},
+	}
+	// Validate static config explicitly before advancing
+	w.State.CurrentStep = model.StepNetwork
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("static network should pass validation: %v", err)
+	}
+	st.record(w, t, "Network→Storage")
+
+	// ── Storage ───────────────────────────────────────────────────────────
+	w.State.Config.Disk = model.DiskInfo{DevPath: "/dev/disk/by-id/nvme-WDC_WD1003FZEX_WD-WCC4K0123456"}
+	st.record(w, t, "Storage→User")
+
+	// Config at User entry: static network fields must be intact
+	if w.State.Config.Network.Address != "192.168.100.50/24" {
+		t.Errorf("Network.Address not persisted: got %q", w.State.Config.Network.Address)
+	}
+	if w.State.Config.Network.Gateway != "192.168.100.1" {
+		t.Errorf("Network.Gateway not persisted: got %q", w.State.Config.Network.Gateway)
+	}
+
+	// ── User: password auth only (no SSH keys) ────────────────────────────
+	w.State.Config.Hostname = "flatcar-b"
+	w.State.Config.Users = []model.UserConfig{
+		{
+			Username:     "operator",
+			PasswordHash: "$6$rounds=4096$salt$hashedpassword", // pre-hashed
+		},
+	}
+	w.State.CurrentStep = model.StepUser
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("password-only user should pass User validation: %v", err)
+	}
+	st.record(w, t, "User→Sysext")
+
+	// ── Sysext: docker selected ───────────────────────────────────────────
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "docker", Description: "Docker CE", Version: "26.1.4", Selected: true},
+		{Name: "tailscale", Description: "Tailscale VPN", Selected: false},
+	}
+	w.State.Config.Sysexts = w.State.Sysexts
+	// Still no nvidia-runtime selected: next must skip StepNvidia
+	st.record(w, t, "Sysext→Update(skip nvidia)")
+	if w.State.CurrentStep != model.StepUpdate {
+		t.Fatalf("after Sysext with docker (no nvidia): expected StepUpdate, got %v", w.State.CurrentStep)
+	}
+
+	// Config at Update: docker sysext must be in selected list
+	selectedNames := make([]string, 0)
+	for _, s := range w.State.Config.Sysexts {
+		if s.Selected {
+			selectedNames = append(selectedNames, s.Name)
+		}
+	}
+	if len(selectedNames) != 1 || selectedNames[0] != "docker" {
+		t.Errorf("expected docker selected, got: %v", selectedNames)
+	}
+
+	// ── Update ────────────────────────────────────────────────────────────
+	w.State.Config.UpdateStrategy = model.UpdateStrategy{RebootStrategy: "off"}
+	st.record(w, t, "Update→Review")
+
+	// ── Review: CheckConsistency with static network + password ──────────
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("Review validation for Route B failed: %v", err)
+	}
+	st.record(w, t, "Review→Install")
+
+	// ── Install → Done ────────────────────────────────────────────────────
+	st.record(w, t, "Install→Done")
+
+	// ── Exact step sequence (StepNvidia absent) ───────────────────────────
+	assertStepSequence(t, st.visited, []model.WizardStep{
+		model.StepNetwork,
+		model.StepStorage,
+		model.StepUser,
+		model.StepSysext,
+		model.StepUpdate,
+		model.StepReview,
+		model.StepInstall,
+		model.StepDone,
+	})
+
+	// ── Execute and verify final InstallConfig ────────────────────────────
+	if err := w.Execute(context.Background()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	cfg := inst.cfg
+	if cfg.Channel != "beta" {
+		t.Errorf("final channel: got %q, want beta", cfg.Channel)
+	}
+	if cfg.Network.Mode != model.NetworkStatic {
+		t.Errorf("final network mode: got %v, want Static", cfg.Network.Mode)
+	}
+	if cfg.Network.Interface != "enp3s0" {
+		t.Errorf("final interface: got %q", cfg.Network.Interface)
+	}
+	if cfg.Network.Address != "192.168.100.50/24" {
+		t.Errorf("final address: got %q", cfg.Network.Address)
+	}
+	if cfg.Users[0].Username != "operator" {
+		t.Errorf("final username: got %q", cfg.Users[0].Username)
+	}
+	if cfg.Users[0].PasswordHash == "" {
+		t.Error("PasswordHash must be non-empty for password-only user")
+	}
+	if len(cfg.Users[0].SSHKeys) != 0 {
+		t.Errorf("expected no SSH keys for password user, got %v", cfg.Users[0].SSHKeys)
+	}
+	dockerFound := false
+	for _, s := range cfg.Sysexts {
+		if s.Name == "docker" && s.Selected {
+			dockerFound = true
+		}
+	}
+	if !dockerFound {
+		t.Error("docker sysext not found in final config")
+	}
+	if cfg.UpdateStrategy.RebootStrategy != "off" {
+		t.Errorf("final reboot strategy: got %q, want off", cfg.UpdateStrategy.RebootStrategy)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Route C: Welcome(IgnitionURL) → [TUI: GoToStep(Storage)] →
+//
+//	Storage → [TUI: GoToStep(Review)] → Review → Install → Done
+//
+// The skip logic lives in tui.go (it calls GoToStep after Welcome and Storage
+// when IgnitionURL is set). This test mirrors that exact behaviour at the
+// wizard layer so the wizard's GoToStep + CheckConsistency contract is tested.
+// ---------------------------------------------------------------------------
+func TestRouteC_IgnitionURL_TUISkip_StorageThenReview(t *testing.T) {
+	w, _, _, inst := newTestWizard()
+
+	// Simulated step log — we record manually since we use GoToStep not Next
+	var visited []model.WizardStep
+
+	// ── Welcome: set IgnitionURL ──────────────────────────────────────────
+	if w.State.CurrentStep != model.StepWelcome {
+		t.Fatalf("expected StepWelcome, got %v", w.State.CurrentStep)
+	}
+	w.State.Config.Channel = "stable"
+	w.State.Config.IgnitionURL = "https://provisioning.example.com/ignition/node42.ign"
+
+	// Welcome validation must accept valid IgnitionURL
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("Welcome with valid IgnitionURL should pass: %v", err)
+	}
+
+	// TUI behaviour: after confirming Welcome with IgnitionURL → GoToStep(Storage)
+	w.GoToStep(model.StepStorage)
+	visited = append(visited, w.State.CurrentStep)
+	if w.State.CurrentStep != model.StepStorage {
+		t.Fatalf("GoToStep(Storage) failed, got %v", w.State.CurrentStep)
+	}
+
+	// Steps NOT visited: Network, User, Sysext, Update
+	for _, skipped := range []model.WizardStep{
+		model.StepNetwork, model.StepUser, model.StepSysext,
+		model.StepNvidia, model.StepUpdate,
+	} {
+		for _, v := range visited {
+			if v == skipped {
+				t.Errorf("step %v should be skipped in Route C but was visited", skipped)
+			}
+		}
+	}
+
+	// ── Storage: select disk ──────────────────────────────────────────────
+	w.State.Config.Disk = model.DiskInfo{DevPath: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_target"}
+	// Validate Storage before the TUI GoToStep(Review)
+	w.State.CurrentStep = model.StepStorage
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("Storage with valid disk should pass: %v", err)
+	}
+
+	// TUI behaviour: after confirming Storage with IgnitionURL → GoToStep(Review)
+	w.GoToStep(model.StepReview)
+	visited = append(visited, w.State.CurrentStep)
+	if w.State.CurrentStep != model.StepReview {
+		t.Fatalf("GoToStep(Review) failed, got %v", w.State.CurrentStep)
+	}
+
+	// ── Review: CheckConsistency must accept IgnitionURL without auth ─────
+	// No users, no SSH keys — normally fails, but IgnitionURL short-circuits
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("Review with IgnitionURL+disk should pass without auth: %v", err)
+	}
+
+	// Advance Review → Install → Done via Next()
+	if err := w.Next(); err != nil {
+		t.Fatalf("Review→Install: %v", err)
+	}
+	visited = append(visited, w.State.CurrentStep)
+	if w.State.CurrentStep != model.StepInstall {
+		t.Fatalf("expected StepInstall, got %v", w.State.CurrentStep)
+	}
+
+	if err := w.Next(); err != nil {
+		t.Fatalf("Install→Done: %v", err)
+	}
+	visited = append(visited, w.State.CurrentStep)
+	if w.State.CurrentStep != model.StepDone {
+		t.Fatalf("expected StepDone, got %v", w.State.CurrentStep)
+	}
+
+	// ── Verify only Storage, Review, Install, Done were visited ──────────
+	// (Network/User/Sysext/Update/Nvidia never appear)
+	wantVisited := []model.WizardStep{
+		model.StepStorage,
+		model.StepReview,
+		model.StepInstall,
+		model.StepDone,
+	}
+	assertStepSequence(t, visited, wantVisited)
+
+	// ── Execute: final config must carry IgnitionURL and disk ─────────────
+	if err := w.Execute(context.Background()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	cfg := inst.cfg
+	if cfg.IgnitionURL != "https://provisioning.example.com/ignition/node42.ign" {
+		t.Errorf("final IgnitionURL: got %q", cfg.IgnitionURL)
+	}
+	if cfg.Disk.DevPath != "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_target" {
+		t.Errorf("final disk: got %q", cfg.Disk.DevPath)
+	}
+	// No users/SSH keys injected — IgnitionURL provides them externally
+	if len(cfg.Users) != 0 {
+		t.Errorf("expected no wizard-generated users in IgnitionURL mode, got: %v", cfg.Users)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Route D: Welcome → Network → Storage → User →
+//
+//	Sysext(nvidia-runtime) → NVIDIA → Update → Review → Install → Done
+//
+// ---------------------------------------------------------------------------
+func TestRouteD_NvidiaRuntime_DriverSetup(t *testing.T) {
+	w, _, _, inst := newTestWizard()
+	st := &stepTracker{}
+
+	// ── Welcome ───────────────────────────────────────────────────────────
+	st.record(w, t, "Welcome→Network")
+
+	// ── Network: DHCP ─────────────────────────────────────────────────────
+	w.State.Config.Network.Mode = model.NetworkDHCP
+	st.record(w, t, "Network→Storage")
+
+	// ── Storage ───────────────────────────────────────────────────────────
+	w.State.Config.Disk = model.DiskInfo{DevPath: "/dev/disk/by-id/nvme-TOSHIBA_KXG60ZNV256G_12345ABCDE"}
+	st.record(w, t, "Storage→User")
+
+	// ── User ──────────────────────────────────────────────────────────────
+	w.State.Config.Hostname = "gpu-node-01"
+	w.State.Config.Users = []model.UserConfig{
+		{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpuKey user@workstation"}},
+	}
+	st.record(w, t, "User→Sysext")
+
+	// ── Sysext: select nvidia-runtime ─────────────────────────────────────
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "docker", Description: "Docker CE", Selected: false},
+		{Name: "nvidia-runtime", Description: "NVIDIA Container Toolkit", Selected: true},
+	}
+	w.State.Config.Sysexts = w.State.Sysexts
+	// With nvidia-runtime selected, Next() must visit StepNvidia
+	st.record(w, t, "Sysext→Nvidia")
+	if w.State.CurrentStep != model.StepNvidia {
+		t.Fatalf("after Sysext with nvidia-runtime: expected StepNvidia, got %v", w.State.CurrentStep)
+	}
+
+	// ── NVIDIA: choose driver series ──────────────────────────────────────
+	w.State.Config.NvidiaDriverVersion = "570-open"
+	// Validate at Nvidia step (always nil — no validation required)
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("StepNvidia validation should always pass: %v", err)
+	}
+	st.record(w, t, "Nvidia→Update")
+	if w.State.CurrentStep != model.StepUpdate {
+		t.Fatalf("after Nvidia: expected StepUpdate, got %v", w.State.CurrentStep)
+	}
+
+	// Config at Update: nvidia driver version must be set
+	if w.State.Config.NvidiaDriverVersion != "570-open" {
+		t.Errorf("NvidiaDriverVersion not persisted: got %q", w.State.Config.NvidiaDriverVersion)
+	}
+
+	// ── Update ────────────────────────────────────────────────────────────
+	st.record(w, t, "Update→Review")
+
+	// ── Review: CheckConsistency must pass with nvidia config ─────────────
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("Review validation for Route D failed: %v", err)
+	}
+	st.record(w, t, "Review→Install")
+
+	// ── Install → Done ────────────────────────────────────────────────────
+	st.record(w, t, "Install→Done")
+
+	// ── Exact step sequence: StepNvidia IS present ────────────────────────
+	assertStepSequence(t, st.visited, []model.WizardStep{
+		model.StepNetwork,
+		model.StepStorage,
+		model.StepUser,
+		model.StepSysext,
+		model.StepNvidia, // present this time
+		model.StepUpdate,
+		model.StepReview,
+		model.StepInstall,
+		model.StepDone,
+	})
+
+	// ── Execute and verify final InstallConfig ────────────────────────────
+	if err := w.Execute(context.Background()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	cfg := inst.cfg
+	if cfg.NvidiaDriverVersion != "570-open" {
+		t.Errorf("final NvidiaDriverVersion: got %q, want 570-open", cfg.NvidiaDriverVersion)
+	}
+	if cfg.Hostname != "gpu-node-01" {
+		t.Errorf("final hostname: got %q", cfg.Hostname)
+	}
+	nvidiaSelected := false
+	for _, s := range cfg.Sysexts {
+		if s.Name == "nvidia-runtime" && s.Selected {
+			nvidiaSelected = true
+		}
+	}
+	if !nvidiaSelected {
+		t.Error("nvidia-runtime must be selected in final config for Route D")
+	}
+
+	// ── Previous back navigation: Update→Nvidia→Sysext (not skipping) ─────
+	w.State.CurrentStep = model.StepUpdate
+	w.Previous() // should land on StepNvidia (selected)
+	if w.State.CurrentStep != model.StepNvidia {
+		t.Errorf("Previous from Update with nvidia selected: expected StepNvidia, got %v", w.State.CurrentStep)
+	}
+	w.Previous() // StepNvidia → StepSysext
+	if w.State.CurrentStep != model.StepSysext {
+		t.Errorf("Previous from Nvidia: expected StepSysext, got %v", w.State.CurrentStep)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Route E: Welcome → ... → Review → Previous×N back to User → fix SSH key →
+//
+//	re-advance → Review → Install → Done
+//
+// Tests that going back via Previous(), mutating config, and re-advancing
+// produces a final InstallConfig that reflects the NEW values, not the old ones.
+// ---------------------------------------------------------------------------
+func TestRouteE_ReviewBackToUser_FixAndReadvance(t *testing.T) {
+	w, _, _, inst := newTestWizard()
+
+	// ── Phase 1: Advance to Review with an initial (bad) SSH key ──────────
+	w.State.Config.Channel = "stable"
+	w.State.Config.Network.Mode = model.NetworkDHCP
+	w.State.Config.Disk = model.DiskInfo{DevPath: "/dev/disk/by-id/scsi-0QEMU_HARDDISK_fix-test"}
+	w.State.Config.Hostname = "flatcar-e"
+	w.State.Config.Users = []model.UserConfig{
+		{
+			Username: "core",
+			SSHKeys:  []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOriginalKey original@host"},
+		},
+	}
+
+	// Walk straight to Review without going through Next() gate sequentially
+	// (the user filled everything in and is on Review)
+	w.State.CurrentStep = model.StepReview
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("initial Review should pass: %v", err)
+	}
+
+	// ── Phase 2: Go back to User to fix the SSH key ───────────────────────
+	// Simulate pressing Back 3 times: Review → Update → Sysext → User
+	// (with no nvidia selected, Previous skips Nvidia)
+	w.Previous() // Review → Update
+	if w.State.CurrentStep != model.StepUpdate {
+		t.Fatalf("Previous from Review: expected StepUpdate, got %v", w.State.CurrentStep)
+	}
+	w.Previous() // Update → Sysext (skips Nvidia since not selected)
+	if w.State.CurrentStep != model.StepSysext {
+		t.Fatalf("Previous from Update: expected StepSysext (skip Nvidia), got %v", w.State.CurrentStep)
+	}
+	w.Previous() // Sysext → User
+	if w.State.CurrentStep != model.StepUser {
+		t.Fatalf("Previous from Sysext: expected StepUser, got %v", w.State.CurrentStep)
+	}
+
+	// ── Phase 3: Mutate — replace SSH key + add second user ───────────────
+	w.State.Config.Users = []model.UserConfig{
+		{
+			Username: "core",
+			SSHKeys:  []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixedKey fixed@workstation"},
+		},
+		{
+			Username: "admin",
+			SSHKeys:  []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAdminKey admin@ci"},
+		},
+	}
+	// Validate User step with new config
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("User validation after edit: %v", err)
+	}
+
+	// ── Phase 4: Re-advance back to Review ───────────────────────────────
+	// Record the step sequence for the re-advance portion
+	st := &stepTracker{}
+	st.record(w, t, "User→Sysext") // User → Sysext
+	if w.State.CurrentStep != model.StepSysext {
+		t.Fatalf("re-advance User→Sysext: got %v", w.State.CurrentStep)
+	}
+
+	st.record(w, t, "Sysext→Update") // Sysext → Update (skip Nvidia)
+	if w.State.CurrentStep != model.StepUpdate {
+		t.Fatalf("re-advance Sysext→Update: got %v", w.State.CurrentStep)
+	}
+
+	st.record(w, t, "Update→Review") // Update → Review
+	if w.State.CurrentStep != model.StepReview {
+		t.Fatalf("re-advance Update→Review: got %v", w.State.CurrentStep)
+	}
+
+	// Re-advance sequence must be exactly Sysext → Update → Review
+	assertStepSequence(t, st.visited, []model.WizardStep{
+		model.StepSysext,
+		model.StepUpdate,
+		model.StepReview,
+	})
+
+	// ── Phase 5: Review must reflect the NEW users ─────────────────────────
+	if len(w.State.Config.Users) != 2 {
+		t.Fatalf("expected 2 users after edit, got %d", len(w.State.Config.Users))
+	}
+	if w.State.Config.Users[0].SSHKeys[0] != "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixedKey fixed@workstation" {
+		t.Errorf("SSH key not updated: got %q", w.State.Config.Users[0].SSHKeys[0])
+	}
+	if w.State.Config.Users[1].Username != "admin" {
+		t.Errorf("second user not added: got %q", w.State.Config.Users[1].Username)
+	}
+
+	// Verify old key is gone
+	for _, u := range w.State.Config.Users {
+		for _, k := range u.SSHKeys {
+			if strings.Contains(k, "original") {
+				t.Error("old SSH key still present after user edit")
+			}
+		}
+	}
+
+	// Review CheckConsistency must pass with new users
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Fatalf("Review after user edit: %v", err)
+	}
+
+	// ── Phase 6: Advance Review → Install → Done ──────────────────────────
+	if err := w.Next(); err != nil {
+		t.Fatalf("Review→Install: %v", err)
+	}
+	if w.State.CurrentStep != model.StepInstall {
+		t.Fatalf("expected StepInstall, got %v", w.State.CurrentStep)
+	}
+	if err := w.Next(); err != nil {
+		t.Fatalf("Install→Done: %v", err)
+	}
+	if w.State.CurrentStep != model.StepDone {
+		t.Fatalf("expected StepDone, got %v", w.State.CurrentStep)
+	}
+
+	// ── Final config must carry the edited users ──────────────────────────
+	if err := w.Execute(context.Background()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	cfg := inst.cfg
+	if len(cfg.Users) != 2 {
+		t.Fatalf("final config: expected 2 users, got %d", len(cfg.Users))
+	}
+	if cfg.Users[0].SSHKeys[0] != "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixedKey fixed@workstation" {
+		t.Errorf("final config: wrong SSH key for core: %q", cfg.Users[0].SSHKeys[0])
+	}
+	if cfg.Users[1].Username != "admin" {
+		t.Errorf("final config: wrong second username: %q", cfg.Users[1].Username)
+	}
+	// Butane must contain fixed key, not original
+	butane, err := w.GenerateButane()
+	if err != nil {
+		t.Fatalf("GenerateButane after Route E: %v", err)
+	}
+	if strings.Contains(butane, "OriginalKey") {
+		t.Error("Butane still contains original SSH key — config mutation not propagated")
+	}
+	if !strings.Contains(butane, "FixedKey") {
+		t.Error("Butane does not contain the fixed SSH key")
+	}
+}

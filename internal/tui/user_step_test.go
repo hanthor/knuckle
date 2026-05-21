@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -141,6 +142,259 @@ func TestEnterUserStep_NoAuth_NoGithub_ShowsError(t *testing.T) {
 }
 
 // --- handleEnter: StepUser, local SSH keys available ---
+
+// --- fetchKeysMsg: GitHub user WITH keys ---
+
+// TestFetchKeysWithKeys_Advances verifies that when the async GitHub key fetch
+// returns one or more keys, the model merges them into cfg.SSHKeys, clears
+// any error, and advances past StepUser.
+func TestFetchKeysWithKeys_Advances(t *testing.T) {
+	// Empty HOME so detectLocalSSHKeys() contributes nothing.
+	t.Setenv("HOME", t.TempDir())
+
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUser
+	w.State.Config.Users = []model.UserConfig{{Username: "core"}}
+
+	m := New(w)
+	m.sshKeyInput = ""
+
+	githubKeys := []string{
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA github1@user",
+		"ssh-rsa AAAAB3NzaC1yc2EAAAA github2@user",
+	}
+	newModel, _ := m.Update(fetchKeysMsg{keys: githubKeys, err: nil})
+	got := newModel.(*Model)
+
+	if got.err != nil {
+		t.Fatalf("expected no error when GitHub returns keys, got: %v", got.err)
+	}
+	if got.Wizard.State.CurrentStep == model.StepUser {
+		t.Error("expected to advance past StepUser when GitHub keys are returned")
+	}
+	if len(got.Wizard.State.Config.SSHKeys) != 2 {
+		t.Errorf("expected 2 SSH keys in config, got %d: %v",
+			len(got.Wizard.State.Config.SSHKeys), got.Wizard.State.Config.SSHKeys)
+	}
+	if got.Wizard.State.Config.SSHKeys[0] != githubKeys[0] {
+		t.Errorf("expected SSHKeys[0] = %q, got %q",
+			githubKeys[0], got.Wizard.State.Config.SSHKeys[0])
+	}
+}
+
+// --- fetchKeysMsg: 404 not found ---
+
+// TestFetchKeysError_404_ShowsRetryHint verifies that a GitHub 404 error
+// ("user not found") surfaces the retry instruction and stays on StepUser.
+func TestFetchKeysError_404_ShowsRetryHint(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUser
+	w.State.Config.Users = []model.UserConfig{{Username: "nonexistent-user-xyz"}}
+
+	m := New(w)
+	// This is exactly the error github.Client returns for a 404 response.
+	notFoundErr := fmt.Errorf("GitHub user %q not found", "nonexistent-user-xyz")
+	newModel, _ := m.Update(fetchKeysMsg{keys: nil, err: notFoundErr})
+	got := newModel.(*Model)
+
+	if got.err == nil {
+		t.Fatal("expected err to be set after 404, got nil")
+	}
+	if !strings.Contains(got.err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error message, got: %v", got.err)
+	}
+	if !strings.Contains(got.err.Error(), "edit the username and press Enter to retry") {
+		t.Errorf("expected retry hint in 404 error message, got: %v", got.err)
+	}
+	if got.Wizard.State.CurrentStep != model.StepUser {
+		t.Errorf("expected to remain on StepUser after 404, got %v",
+			got.Wizard.State.CurrentStep)
+	}
+}
+
+// --- fetchKeysMsg: network timeout ---
+
+// TestFetchKeysError_Timeout_ShowsRetryHint verifies that a network timeout
+// (context.DeadlineExceeded wrapped inside the fetch error) surfaces the retry
+// instruction and stays on StepUser — not a raw Go error string.
+func TestFetchKeysError_Timeout_ShowsRetryHint(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUser
+	w.State.Config.Users = []model.UserConfig{{Username: "core"}}
+
+	m := New(w)
+	// Matches what github.Client returns when the HTTP client times out.
+	timeoutErr := fmt.Errorf("failed to fetch keys: %w", context.DeadlineExceeded)
+	newModel, _ := m.Update(fetchKeysMsg{keys: nil, err: timeoutErr})
+	got := newModel.(*Model)
+
+	if got.err == nil {
+		t.Fatal("expected err to be set after timeout, got nil")
+	}
+	if !strings.Contains(got.err.Error(), "context deadline exceeded") {
+		t.Errorf("expected 'context deadline exceeded' in timeout error, got: %v", got.err)
+	}
+	if !strings.Contains(got.err.Error(), "edit the username and press Enter to retry") {
+		t.Errorf("expected retry hint in timeout error message, got: %v", got.err)
+	}
+	if got.Wizard.State.CurrentStep != model.StepUser {
+		t.Errorf("expected to remain on StepUser after timeout, got %v",
+			got.Wizard.State.CurrentStep)
+	}
+}
+
+// --- handleEnter: manual SSH key only (no GitHub, no password, no local keys) ---
+
+// TestEnterUserStep_ManualSSHKeyOnly_Advances verifies that a user who pastes
+// a public key into the SSH key field (no GitHub username, no password, no local
+// .pub files) can advance past StepUser, and that the key lands in cfg.SSHKeys.
+func TestEnterUserStep_ManualSSHKeyOnly_Advances(t *testing.T) {
+	// Empty HOME: no local keys.
+	t.Setenv("HOME", t.TempDir())
+
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUser
+	w.State.Config.Users = []model.UserConfig{{Username: "core"}}
+
+	m := New(w)
+	m.activeForm = nil
+
+	// Set the manual SSH key field; clear GitHub so no async fetch fires.
+	const manualKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA manualkey@host"
+	for i := range m.fields {
+		switch m.fields[i].key {
+		case "github_user":
+			m.fields[i].value = ""
+		case "ssh_key":
+			m.fields[i].value = manualKey
+		}
+	}
+
+	_, _ = m.handleEnter()
+
+	if m.err != nil {
+		t.Errorf("unexpected error with manual SSH key: %v", m.err)
+	}
+	if m.Wizard.State.CurrentStep == model.StepUser {
+		t.Error("expected to advance past StepUser with manual SSH key")
+	}
+	found := false
+	for _, k := range m.Wizard.State.Config.SSHKeys {
+		if strings.Contains(k, "manualkey@host") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("manual SSH key not found in cfg.SSHKeys: %v",
+			m.Wizard.State.Config.SSHKeys)
+	}
+}
+
+// --- handleEnter: password only (no keys, no GitHub) ---
+
+// TestEnterUserStep_PasswordOnly_Advances verifies that when a user configures
+// only a hashed password (no SSH keys, no GitHub username, no local .pub files),
+// the model treats it as sufficient authentication and advances past StepUser.
+func TestEnterUserStep_PasswordOnly_Advances(t *testing.T) {
+	// Empty HOME: no local keys.
+	t.Setenv("HOME", t.TempDir())
+
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUser
+	// Pre-set a bcrypt hash so no hashing is needed in the test and no SSH
+	// keys are present. applyFields() will not overwrite PasswordHash if the
+	// password field value is empty (which it is after initStepFields).
+	w.State.Config.Users = []model.UserConfig{{
+		Username:     "core",
+		PasswordHash: "$2a$10$aaaabbbbccccddddeeeeff0000111122223333445",
+	}}
+
+	m := New(w)
+	m.activeForm = nil
+
+	// Clear both SSH key and GitHub fields so no async fetch fires.
+	for i := range m.fields {
+		switch m.fields[i].key {
+		case "github_user", "ssh_key":
+			m.fields[i].value = ""
+		}
+	}
+
+	_, _ = m.handleEnter()
+
+	if m.err != nil {
+		t.Errorf("unexpected error with password-only auth: %v", m.err)
+	}
+	if m.Wizard.State.CurrentStep == model.StepUser {
+		t.Error("expected to advance past StepUser with password-only auth")
+	}
+	// No SSH keys should have been added.
+	if len(m.Wizard.State.Config.SSHKeys) != 0 {
+		t.Errorf("expected no SSH keys in password-only config, got: %v",
+			m.Wizard.State.Config.SSHKeys)
+	}
+}
+
+// --- fetchKeysMsg: GitHub keys + local keys both present ---
+
+// TestFetchKeysGitHubPlusLocal_MergesAndAdvances verifies that when a GitHub
+// fetch completes and local .pub files are also present, mergeKeys() deduplicates
+// them and both appear in cfg.SSHKeys, and the wizard advances.
+func TestFetchKeysGitHubPlusLocal_MergesAndAdvances(t *testing.T) {
+	// Create a temp HOME with a local SSH key.
+	dir := t.TempDir()
+	sshDir := filepath.Join(dir, ".ssh")
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		t.Fatalf("creating temp .ssh dir: %v", err)
+	}
+	const localKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI localkey@installer"
+	if err := os.WriteFile(filepath.Join(sshDir, "id_ed25519.pub"),
+		[]byte(localKey+"\n"), 0600); err != nil {
+		t.Fatalf("writing temp pubkey: %v", err)
+	}
+	t.Setenv("HOME", dir)
+
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUser
+	w.State.Config.Users = []model.UserConfig{{Username: "core"}}
+
+	m := New(w)
+	m.sshKeyInput = ""
+
+	githubKeys := []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA githubkey@user"}
+	newModel, _ := m.Update(fetchKeysMsg{keys: githubKeys, err: nil})
+	got := newModel.(*Model)
+
+	if got.err != nil {
+		t.Fatalf("expected no error, got: %v", got.err)
+	}
+	if got.Wizard.State.CurrentStep == model.StepUser {
+		t.Error("expected to advance past StepUser when both local and GitHub keys are present")
+	}
+	if len(got.Wizard.State.Config.SSHKeys) != 2 {
+		t.Errorf("expected 2 merged keys (local + github), got %d: %v",
+			len(got.Wizard.State.Config.SSHKeys), got.Wizard.State.Config.SSHKeys)
+	}
+	// Both keys must be present.
+	foundLocal, foundGitHub := false, false
+	for _, k := range got.Wizard.State.Config.SSHKeys {
+		if strings.Contains(k, "localkey@installer") {
+			foundLocal = true
+		}
+		if strings.Contains(k, "githubkey@user") {
+			foundGitHub = true
+		}
+	}
+	if !foundLocal {
+		t.Errorf("local SSH key not found in merged SSHKeys: %v",
+			got.Wizard.State.Config.SSHKeys)
+	}
+	if !foundGitHub {
+		t.Errorf("GitHub SSH key not found in merged SSHKeys: %v",
+			got.Wizard.State.Config.SSHKeys)
+	}
+}
 
 // TestEnterUserStep_WithLocalKeys_Advances verifies that when ~/.ssh/*.pub
 // contains a valid SSH key, handleEnter() on StepUser detects it via
