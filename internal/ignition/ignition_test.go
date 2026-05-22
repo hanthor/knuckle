@@ -906,3 +906,141 @@ func TestGenerateButaneTailscaleSkippedWhenNoAuthKey(t *testing.T) {
 		t.Error("tailscaled.service should not be force-enabled when AuthKey is empty")
 	}
 }
+
+// ── tailscaleExtraArgs ────────────────────────────────────────────────────────
+
+func TestTailscaleExtraArgs_ExitNode(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "exit-node",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA k"}}},
+		Tailscale: model.TailscaleConfig{
+			AuthKey: "tskey-auth-kSomeKeyID123-SomeSecretThatIsLongEnoughHere",
+			Mode:    model.TailscaleModeExitNode,
+		},
+	}
+	out, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("GenerateButane: %v", err)
+	}
+	if !strings.Contains(out, "--advertise-exit-node") {
+		t.Errorf("exit-node mode should add --advertise-exit-node: %s", out)
+	}
+	if !strings.Contains(out, "net.ipv4.ip_forward") {
+		t.Errorf("exit-node mode should enable ip_forward: %s", out)
+	}
+}
+
+func TestTailscaleExtraArgs_SubnetRouter(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "subnet-router",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA k"}}},
+		Tailscale: model.TailscaleConfig{
+			AuthKey: "tskey-auth-kSomeKeyID123-SomeSecretThatIsLongEnoughHere",
+			Mode:    model.TailscaleModeSubnetRouter,
+			Routes:  "10.0.0.0/8, 192.168.1.0/24",
+		},
+	}
+	out, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("GenerateButane: %v", err)
+	}
+	if !strings.Contains(out, "--advertise-routes=10.0.0.0/8,192.168.1.0/24") {
+		t.Errorf("subnet-router should set advertise-routes (spaces stripped): %s", out)
+	}
+}
+
+func TestTailscaleExtraArgs_SubnetRouter_EmptyRoutes(t *testing.T) {
+	// Empty routes → empty TS_EXTRA_ARGS (validator prevents this at config time,
+	// but the function should handle it gracefully)
+	ts := model.TailscaleConfig{Mode: model.TailscaleModeSubnetRouter, Routes: ""}
+	if got := tailscaleExtraArgs(ts); got != "" {
+		t.Errorf("empty routes → want empty string, got %q", got)
+	}
+}
+
+func TestTailscaleExtraArgs_ConnectMode(t *testing.T) {
+	ts := model.TailscaleConfig{Mode: model.TailscaleModeConnect}
+	if got := tailscaleExtraArgs(ts); got != "" {
+		t.Errorf("connect mode → want empty string, got %q", got)
+	}
+}
+
+func TestGenerateButane_TailscaleConnect(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "ts-connect",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA k"}}},
+		Tailscale: model.TailscaleConfig{
+			AuthKey: "tskey-auth-kSomeKeyID123-SomeSecretThatIsLongEnoughHere",
+			Mode:    model.TailscaleModeConnect,
+		},
+	}
+	out, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("GenerateButane: %v", err)
+	}
+	if !strings.Contains(out, "tailscale.env") {
+		t.Errorf("connect mode should write tailscale.env: %s", out)
+	}
+	if strings.Contains(out, "ip_forward") {
+		t.Errorf("connect mode should NOT set ip_forward: %s", out)
+	}
+}
+
+// ── builder indentFragment / renderTemplate ───────────────────────────────────
+
+func TestIndentFragment_EmptyLines(t *testing.T) {
+	// Empty lines inside a fragment should stay empty (no leading spaces)
+	frag := "first line\n\nsecond line\n"
+	out := indentFragment(frag, 4)
+	lines := strings.Split(out, "\n")
+	// Line 0: "    first line", line 1: "", line 2: "    second line"
+	if lines[1] != "" {
+		t.Errorf("blank line should remain blank, got %q", lines[1])
+	}
+	if !strings.HasPrefix(lines[0], "    ") {
+		t.Errorf("non-blank line should be indented: %q", lines[0])
+	}
+}
+
+func TestRenderTemplate_ParseError(t *testing.T) {
+	_, err := renderTemplate("bad", "{{.Unclosed", nil)
+	if err == nil {
+		t.Fatal("expected parse error for malformed template, got nil")
+	}
+}
+
+func TestRenderTemplate_NilData_NoError(t *testing.T) {
+	// A template that accesses no data works fine with nil
+	out, err := renderTemplate("ok", "hello world", nil)
+	if err != nil {
+		t.Fatalf("unexpected error with safe template: %v", err)
+	}
+	if out != "hello world" {
+		t.Errorf("expected %q, got %q", "hello world", out)
+	}
+}
+
+// ── CompileToIgnition error path ──────────────────────────────────────────────
+
+func TestCompileToIgnition_InvalidButane(t *testing.T) {
+	_, err := CompileToIgnition("this is not valid butane yaml: {{{")
+	if err == nil {
+		t.Fatal("expected error for invalid Butane input, got nil")
+	}
+}
+
+func TestCompileToIgnition_FatalWarning(t *testing.T) {
+	// A Butane document with a reference to a nonexistent config source
+	// triggers a fatal compilation error.
+	bad := "variant: flatcar\nversion: 1.1.0\nstorage:\n  files:\n    - path: /etc/foo\n      contents:\n        local: nonexistent.txt\n"
+	_, err := CompileToIgnition(bad)
+	if err == nil {
+		t.Fatal("expected fatal error for missing local file reference, got nil")
+	}
+}

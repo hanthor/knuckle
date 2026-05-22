@@ -94,3 +94,27 @@ func TestBuilderEndToEndProducesValidButane(t *testing.T) {
 		t.Errorf("compiled Ignition missing /etc/hostname entry, got:\n%s", ign)
 	}
 }
+
+func TestBuilder_AddStorageLink(t *testing.T) {
+	b := NewBuilder(&model.InstallConfig{})
+	b.AddStorageLink("    - path: /etc/localtime\n      target: /usr/share/zoneinfo/UTC\n")
+	yaml := b.Build()
+	if !strings.Contains(yaml, "links:") {
+		t.Errorf("Build() missing links section: %q", yaml)
+	}
+	if !strings.Contains(yaml, "localtime") {
+		t.Errorf("Build() missing localtime entry: %q", yaml)
+	}
+}
+
+func TestBuilder_SetPasswdUsers(t *testing.T) {
+	b := NewBuilder(&model.InstallConfig{})
+	b.SetPasswdUsers("    - name: core\n      ssh_authorized_keys:\n        - ssh-ed25519 AAAA k\n")
+	yaml := b.Build()
+	if !strings.Contains(yaml, "passwd:") {
+		t.Errorf("Build() missing passwd section: %q", yaml)
+	}
+	if !strings.Contains(yaml, "core") {
+		t.Errorf("Build() missing user 'core': %q", yaml)
+	}
+}

@@ -103,7 +103,7 @@ passwd:
 	}
 }
 
-func TestBuilder_AddStorageLink(t *testing.T) {
+func TestCompile_BuilderStorageLinkIntegration(t *testing.T) {
 	b := NewBuilder(&model.InstallConfig{})
 	b.AddStorageLink("    - path: /etc/localtime\n      target: /usr/share/zoneinfo/UTC\n")
 	yaml := b.Build()
