@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+// channelHTTPClient is the shared HTTP client used for fetching Flatcar channel information,
+// enabling connection reuse across parallel requests.
 var channelHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 // ChannelInfo holds version details for a Flatcar release channel.
@@ -142,6 +144,7 @@ func FetchAllChannelsArch(ctx context.Context, arch string) ([]ChannelInfo, erro
 	}, channels...)
 }
 
+// fetchAllChannelsWithURLFn is a helper for parallel channel fetching with custom URLs.
 func fetchAllChannelsWithURLFn(ctx context.Context, urlFn func(string) (string, string), channels ...string) ([]ChannelInfo, error) {
 	if len(channels) == 0 {
 		channels = []string{"stable", "beta", "alpha", "lts"}
@@ -175,6 +178,7 @@ func fetchAllChannelsWithURLFn(ctx context.Context, urlFn func(string) (string, 
 	return results, nil
 }
 
+// httpGet performs a GET request with the shared client and returns the body as a string.
 func httpGet(ctx context.Context, url string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -200,7 +204,7 @@ func httpGet(ctx context.Context, url string) (string, error) {
 	return string(body), nil
 }
 
-// parseVersionTxt parses key=value lines from version.txt.
+// parseVersionTxt parses key=value lines from version.txt into the ChannelInfo.
 func parseVersionTxt(body string, info *ChannelInfo) {
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)
