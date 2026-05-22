@@ -721,3 +721,66 @@ func TestGenerateButaneNvidiaDriverVersionEscaped(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateButaneSwapEnabledDefault(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "swap-default",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core"}},
+		Swap:     model.SwapConfig{Enabled: true, SizeMB: 0},
+	}
+	out, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "/var/swapfile") {
+		t.Error("expected /var/swapfile in output")
+	}
+	if !strings.Contains(out, "fallocate -l 4096M") {
+		t.Errorf("expected default 4096 MiB swap, got:\n%s", out)
+	}
+	if !strings.Contains(out, "var-swapfile.swap") {
+		t.Error("expected var-swapfile.swap unit")
+	}
+	if !strings.Contains(out, "knuckle-create-swapfile.service") {
+		t.Error("expected knuckle-create-swapfile.service")
+	}
+}
+
+func TestGenerateButaneSwapExplicitSize(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "swap-8g",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core"}},
+		Swap:     model.SwapConfig{Enabled: true, SizeMB: 8192},
+	}
+	out, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "fallocate -l 8192M") {
+		t.Errorf("expected 8192 MiB swap, got:\n%s", out)
+	}
+}
+
+func TestGenerateButaneSwapDisabled(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "no-swap",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core"}},
+		Swap:     model.SwapConfig{Enabled: false},
+	}
+	out, err := g.GenerateButane(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(out, "/var/swapfile") {
+		t.Error("/var/swapfile must not appear when Swap.Enabled = false")
+	}
+	if strings.Contains(out, "var-swapfile.swap") {
+		t.Error("swap unit must not appear when Swap.Enabled = false")
+	}
+}

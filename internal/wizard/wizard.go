@@ -73,6 +73,9 @@ func New(prober probe.Prober, bakeryClient bakery.Client, installer install.Inst
 				Arch:           runtime.GOARCH,
 				Channel:        "stable",
 				UpdateStrategy: model.UpdateStrategy{RebootStrategy: "reboot"},
+				// Default to enabling swap (issue #95). Sized at render time —
+				// 0 SizeMB means "use DefaultSwapSizeMB".
+				Swap: model.SwapConfig{Enabled: true, SizeMB: 0},
 			},
 		},
 		Prober:    prober,

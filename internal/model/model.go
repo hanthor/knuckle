@@ -61,8 +61,22 @@ type InstallConfig struct {
 	UpdateStrategy      UpdateStrategy
 	IgnitionURL         string // external ignition URL (mutually exclusive with local gen)
 	NvidiaDriverVersion string // Flatcar NVIDIA kernel driver series, e.g. "570-open". Empty = none.
+	Swap                SwapConfig
 	DryRun              bool
 }
+
+// SwapConfig holds swap-file provisioning settings.
+// Enabled+SizeMB=0 ⇒ auto-size via min(detectedRAM, DefaultSwapSizeMB) at install time
+// (the wizard picks a sensible default for the host). Enabled=false ⇒ no swap unit.
+type SwapConfig struct {
+	Enabled bool
+	SizeMB  int // 0 = auto. Otherwise explicit MiB (e.g. 4096 for 4 GiB).
+}
+
+// DefaultSwapSizeMB is the swap size knuckle picks when Swap.Enabled = true and
+// Swap.SizeMB = 0. 4 GiB is the upstream Flatcar example and a reasonable cap
+// for home-server workloads; explicit SizeMB always overrides.
+const DefaultSwapSizeMB = 4096
 
 // UpdateStrategy holds OS update and reboot settings for Flatcar.
 type UpdateStrategy struct {
