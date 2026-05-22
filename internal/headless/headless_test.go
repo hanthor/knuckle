@@ -1246,9 +1246,9 @@ func TestRun_MultipleGitHubUsers(t *testing.T) {
 	fetchGitHubKeysFunc = func(_ context.Context, username string) ([]string, error) {
 		switch username {
 		case "alice":
-			return []string{"ssh-ed25519 AAAAalice alice@gh"}, nil
+			return []string{"ssh-ed25519 AAAAYWxpY2U= alice@gh"}, nil
 		case "bob":
-			return []string{"ssh-ed25519 AAAAbob bob@gh"}, nil
+			return []string{"ssh-ed25519 AAAAYm9i bob@gh"}, nil
 		default:
 			return nil, fmt.Errorf("unknown user %q", username)
 		}
@@ -1290,7 +1290,7 @@ func TestRun_SecondGitHubUserFailsFirstSucceeds(t *testing.T) {
 	old := fetchGitHubKeysFunc
 	fetchGitHubKeysFunc = func(_ context.Context, username string) ([]string, error) {
 		if username == "alice" {
-			return []string{"ssh-ed25519 AAAAalice alice@gh"}, nil
+			return []string{"ssh-ed25519 AAAAYWxpY2U= alice@gh"}, nil
 		}
 		return nil, fmt.Errorf("403 rate limited")
 	}
@@ -1413,7 +1413,21 @@ func TestValidate_InvalidUsername(t *testing.T) {
 }
 
 func TestValidate_UserWithPasswordOnly(t *testing.T) {
-	// User with password but no SSH keys should be valid.
+	// User with a valid crypt hash but no SSH keys should be valid.
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "node01",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users:    []UserConfig{{Username: "core", Password: "$6$rounds=4096$salt$hashhash"}},
+		Disk:     "/dev/vdb",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("user with valid password hash should be valid, got: %v", err)
+	}
+}
+
+func TestValidate_UserWithPlaintextPassword(t *testing.T) {
+	// Plaintext passwords must be rejected — headless expects pre-hashed values.
 	cfg := &Config{
 		Channel:  "stable",
 		Hostname: "node01",
@@ -1421,8 +1435,8 @@ func TestValidate_UserWithPasswordOnly(t *testing.T) {
 		Users:    []UserConfig{{Username: "core", Password: "hunter2"}},
 		Disk:     "/dev/vdb",
 	}
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("user with password should be valid, got: %v", err)
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for plaintext password, got nil")
 	}
 }
 

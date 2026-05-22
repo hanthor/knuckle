@@ -578,6 +578,29 @@ func TestFlatcarVersion(t *testing.T) {
 	}
 }
 
+func TestPasswordHash(t *testing.T) {
+	tests := []struct {
+		in      string
+		wantErr bool
+	}{
+		{"", false},
+		{"$6$rounds=4096$salt$hash", false},
+		{"$y$hash", false},
+		{"$2b$12$hash", false},
+		{"$5$hash", false},
+		{"hunter2", true},
+		{"plaintext", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			err := PasswordHash(tt.in)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("PasswordHash(%q) error=%v wantErr=%v", tt.in, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestSysextName(t *testing.T) {
 	tests := []struct {
 		in      string

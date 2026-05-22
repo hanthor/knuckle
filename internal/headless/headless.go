@@ -67,7 +67,7 @@ type NetworkConfig struct {
 // UserConfig for JSON input.
 type UserConfig struct {
 	Username   string   `json:"username"`
-	Password   string   `json:"password,omitempty"`
+	Password   string   `json:"password,omitempty"` // expects a crypt hash ($6$, $y$, $2b$, $5$), not plaintext
 	SSHKeys    []string `json:"ssh_keys,omitempty"`
 	GithubUser string   `json:"github_user,omitempty"`
 	Groups     []string `json:"groups,omitempty"`
@@ -307,6 +307,16 @@ func (c *Config) Validate() error {
 			if len(u.SSHKeys) == 0 && u.Password == "" && u.GithubUser == "" {
 				return fmt.Errorf("users[%d] (%s): must have ssh_keys, password, or github_user", i, u.Username)
 			}
+			if u.Password != "" {
+				if err := validate.PasswordHash(u.Password); err != nil {
+					return fmt.Errorf("users[%d] (%s): %w", i, u.Username, err)
+				}
+			}
+			for j, key := range u.SSHKeys {
+				if err := validate.SSHPublicKey(key); err != nil {
+					return fmt.Errorf("users[%d] (%s) ssh_keys[%d]: %w", i, u.Username, j, err)
+				}
+			}
 		}
 	}
 
@@ -390,6 +400,11 @@ func Run(ctx context.Context, cfg *Config, installer install.Installer, logger *
 			}
 			if len(keys) == 0 {
 				return fmt.Errorf("no SSH keys found for GitHub user %q", u.GithubUser)
+			}
+			for _, k := range keys {
+				if err := validate.SSHPublicKey(k); err != nil {
+					return fmt.Errorf("invalid SSH key from GitHub user %q: %w", u.GithubUser, err)
+				}
 			}
 			cfg.Users[i].SSHKeys = append(cfg.Users[i].SSHKeys, keys...)
 			fmt.Printf("  ✓ %d key(s) fetched\n", len(keys))
