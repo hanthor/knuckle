@@ -546,3 +546,50 @@ func TestWriteIgnitionFileCleanup(t *testing.T) {
 		t.Errorf("file should be removed after cleanup, got err=%v", err)
 	}
 }
+
+func TestWriteIgnitionFile_Content(t *testing.T) {
+	spy := runner.NewSpyRunner()
+	installer := NewFlatcarInstaller(spy, testLogger())
+
+	content := `{"ignition":{"version":"3.4.0"}}`
+	path, err := installer.WriteIgnitionFile(content)
+	if err != nil {
+		t.Fatalf("WriteIgnitionFile: %v", err)
+	}
+	defer func() { _ = os.Remove(path) }()
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != content {
+		t.Errorf("file content = %q, want %q", got, content)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("file mode = %o, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestCleanupIgnitionFile_EmptyPath(t *testing.T) {
+	// cleanupIgnitionFile with no path set is a no-op.
+	spy := runner.NewSpyRunner()
+	installer := NewFlatcarInstaller(spy, testLogger())
+	installer.ignitionPath = ""
+	installer.cleanupIgnitionFile() // should not panic
+}
+
+func TestCleanupIgnitionFile_AlreadyRemoved(t *testing.T) {
+	// cleanupIgnitionFile on a path that no longer exists should be silent.
+	spy := runner.NewSpyRunner()
+	installer := NewFlatcarInstaller(spy, testLogger())
+	installer.ignitionPath = "/tmp/knuckle-test-nonexistent-file-xyz"
+	installer.cleanupIgnitionFile() // os.IsNotExist → no warning
+	if installer.ignitionPath != "" {
+		t.Error("ignitionPath should be cleared after cleanup")
+	}
+}
