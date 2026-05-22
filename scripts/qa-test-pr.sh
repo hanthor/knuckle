@@ -286,6 +286,9 @@ T1=$(_ghost "
 " 2>&1) || T1="DRY_RUN_ERROR"
 
 DRY_OK=$(echo "$T1" | grep -c "Installation complete" || true)
+# Also check for JSON parse errors — indicates config was malformed
+JSON_ERR=$(echo "$T1" | grep -c "parsing config JSON\|invalid character" || true)
+[[ $JSON_ERR -gt 0 ]] && DRY_OK=0
 {
   echo "### Tier 1 — Installer VM: tool check + dry-run (port ${PORT})"
   echo
