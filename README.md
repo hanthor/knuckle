@@ -1,5 +1,7 @@
 # Knuckle
 
+[![codecov](https://codecov.io/gh/projectbluefin/knuckle/graph/badge.svg)](https://codecov.io/gh/projectbluefin/knuckle)
+
 A modern, interactive TUI "installer" for [Flatcar Container Linux](https://www.flatcar.org/), designed for bare-metal deployments. Not a real installer because making one would be dumb. There's no reason to make a "Bluefin Server" if Bluefin just gives you a nice tool to use Flatcar. 
 
 Knuckle is a charm.sh form that makes a valid ignition file and passes it to the Flatcat installer. We're just making users not have to use ignition, with an ubuntu-server style install UX. 
