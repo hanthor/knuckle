@@ -177,14 +177,20 @@ Ghost (192.168.1.102) is the dedicated headless QEMU host for VM-level testing:
 
 ### Per-PR Verification Policy
 
-| PR labels | Minimum required before merge |
-|---|---|
-| `domain:ci`, `kind/test` only | `just ci` green |
-| `domain:validate`, `domain:model`, `domain:runner` | `just ci` green |
-| `domain:ignition`, `domain:headless`, `domain:wizard` | `just ci` + ghost Tier 1 (dry-run) |
-| `domain:install`, `domain:iso` | `just ci` + ghost Tier 2 (headless install) |
-| `domain:iso` | `just ci` + ghost Tier 3 (`hardware-repro`) |
-| `size:XL` or >4 domains | `just ci` + human `just vm-e2e` sign-off |
+| PR labels | Minimum required before merge | Evidence standard |
+|---|---|---|
+| `domain:ci`, `kind/test`, docs only | `just ci` green | Unit test output |
+| `domain:validate`, `domain:model`, `domain:runner` | `just ci` green | Unit test output |
+| `domain:probe`, `domain:tui` | ghost Tier 1 (tool check + dry-run) | Tool versions + dry-run log |
+| `domain:security` | ghost Tier 1 + bad-input rejection tests | Every invalid input must be **rejected** with quoted output |
+| `domain:ignition`, `domain:headless` | **ghost Tier 3 (install + boot + assertions)** | Ignition files, hostname, authorized_keys from **booted installed system** |
+| `domain:install` | **ghost Tier 3** | GPT table, lsblk, disk-by-id from **booted installed system** |
+| swap feature | **ghost Tier 3** | `swapon --show`, `ls -lah /var/swapfile`, `free -h` from **booted system** |
+| tailscale feature | **ghost Tier 3** | `stat -c "%a %n" /etc/tailscale/tailscale.env` (must be 600) from **booted system** |
+| `domain:iso` | ghost Tier 3 + `hardware-repro` | GPT layout, ISO boot log |
+| `size:XL` or >4 domains | Human `just vm-e2e` sign-off | All 4 passes green |
+
+**The bar:** Tier 3 means the installed system booted and responded to SSH. Evidence is quoted command output from inside that system — not build logs, not unit test output, not exit codes alone.
 
 ---
 
@@ -383,18 +389,31 @@ echo "Exit: $?"
 
 **Tier selection by label:**
 
-| Labels present | Tier | What runs | Time |
-|---|---|---|---|
-| `domain:ci`, `kind/test`, `domain:validate`, etc. | 0 | `just ci` only, no VM | ~2m |
-| `domain:probe`, `domain:tui`, `domain:security` | 1 | Tier 0 + VM tool check + `--dry-run` | ~5m |
-| `domain:install`, `domain:headless`, `domain:ignition` | 2 | Tier 1 + real headless install | ~15m |
-| `domain:iso` | 3 | Tier 2 + `hardware-repro` | ~25m |
+| Labels present | Tier | What runs | Evidence in report | Time |
+|---|---|---|---|---|
+| `domain:ci`, `kind/test`, `domain:validate`, docs | 0 | `just ci` only | Unit test output | ~2m |
+| `domain:probe`, `domain:tui` | 1 | Tier 0 + VM tool check + `--dry-run` | Tool versions, dry-run log | ~5m |
+| `domain:security` | 1+sec | Tier 1 + bad-input rejection tests | Each invalid input must be **rejected** (quoted output) | ~7m |
+| `domain:install`, `domain:headless`, `domain:ignition`, swap, tailscale | **3** | Tier 1 + **full install + BOOT installed system** + domain assertions | GPT table, swapfile, env file modes, Ignition-provisioned files — **all quoted from installed system** | ~20m |
+| `domain:iso` | 3 | Tier 3 + `hardware-repro` | ISO boot + GPT + install log | ~30m |
+
+**Full QA science standard — Tier 3 reports must include:**
+- Quoted `sfdisk -l` output (GPT intact)
+- Quoted `swapon --show` (if swap PR)
+- Quoted `stat -c "%a %n" /etc/tailscale/tailscale.env` (if tailscale PR)
+- Quoted `ls ~/.ssh/authorized_keys` (Ignition applied)
+- Quoted `hostname` (config applied correctly)
+- Any `FAIL:` line causes the report to fail
+
+Tier 3 is triggered automatically by the script based on labels. Never accept a
+Tier 1/2 report for a PR that touches the installed system.
 
 **If the script exits non-zero:** read the report. Common failures:
 - `VM BOOT TIMEOUT` — check ghost port occupancy: `ssh jorge@ghost "ss -tlnp | grep 23"`
 - `BUILD FAILED` — the PR has a compilation error; request changes
-- `DRY_RUN_FAIL` — `--headless --dry-run` failed; check the Ignition output in the report
-- `INSTALL_FAIL` — `flatcar-install` failed; check `knuckle.log` in the report
+- `ASSERTIONS_FAILED` — the installed system did not match the expected state
+- `BAD_PW_ACCEPTED_FAIL` — plaintext password was accepted (security regression)
+- `INSTALL_FAILED` — `flatcar-install` exited non-zero; check install log in report
 
 ---
 
