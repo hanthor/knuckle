@@ -7,8 +7,7 @@ Knuckle is a charm.sh form that makes a valid ignition file and passes it to the
 This is also basically [Azure Container Linux (Home Edition)](https://opensource.microsoft.com/blog/2026/05/18/from-open-source-to-agentic-systems-microsoft-at-open-source-summit-north-america-2026/). 
 - [Download an ISO](https://github.com/projectbluefin/knuckle/releases) for ARM or AMD64 and install it.
 - Follow the installer you'll be left with a pristine upstream install of Flatcar linux
-
-
+- This is early and prealpha, all feedback and contributions welcome!
 
 ![img](https://github.com/user-attachments/assets/802bb450-f48c-4186-a1d0-542535124bc5)
 
