@@ -85,3 +85,25 @@ func TestDemoChannels_ReturnsFourChannels(t *testing.T) {
 		}
 	}
 }
+
+func TestDemoBakery_FetchCatalog_DefaultsToAmd64(t *testing.T) {
+	// FetchCatalog is the amd64-defaulting wrapper around FetchCatalogArch.
+	b := &demo.Bakery{}
+	entries, err := b.FetchCatalog(context.Background())
+	if err != nil {
+		t.Fatalf("FetchCatalog: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected demo sysext entries from FetchCatalog")
+	}
+}
+
+func TestDemoInstaller_ContextCancellation(t *testing.T) {
+	inst := &demo.Installer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+	err := inst.Install(ctx, nil, func(string) {})
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+}
