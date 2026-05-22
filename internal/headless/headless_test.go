@@ -1413,7 +1413,21 @@ func TestValidate_InvalidUsername(t *testing.T) {
 }
 
 func TestValidate_UserWithPasswordOnly(t *testing.T) {
-	// User with password but no SSH keys should be valid.
+	// User with a valid crypt hash but no SSH keys should be valid.
+	cfg := &Config{
+		Channel:  "stable",
+		Hostname: "node01",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users:    []UserConfig{{Username: "core", Password: "$6$rounds=4096$salt$hashhash"}},
+		Disk:     "/dev/vdb",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("user with valid password hash should be valid, got: %v", err)
+	}
+}
+
+func TestValidate_UserWithPlaintextPassword(t *testing.T) {
+	// Plaintext passwords must be rejected — headless expects pre-hashed values.
 	cfg := &Config{
 		Channel:  "stable",
 		Hostname: "node01",
@@ -1421,8 +1435,8 @@ func TestValidate_UserWithPasswordOnly(t *testing.T) {
 		Users:    []UserConfig{{Username: "core", Password: "hunter2"}},
 		Disk:     "/dev/vdb",
 	}
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("user with password should be valid, got: %v", err)
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for plaintext password, got nil")
 	}
 }
 

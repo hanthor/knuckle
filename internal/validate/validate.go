@@ -295,6 +295,21 @@ func FlatcarVersion(s string) error {
 	return nil
 }
 
+// PasswordHash validates a Linux shadow-format password hash.
+// Must start with a known crypt prefix ($6$, $y$, $2b$, $5$) or be empty.
+func PasswordHash(s string) error {
+	if s == "" {
+		return nil
+	}
+	valid := []string{"$6$", "$y$", "$2b$", "$5$"}
+	for _, prefix := range valid {
+		if strings.HasPrefix(s, prefix) {
+			return nil
+		}
+	}
+	return fmt.Errorf("password_hash must be a valid crypt hash (starting with $6$, $y$, $2b$, or $5$); got plain text or unsupported format")
+}
+
 // InterfaceName validates a Linux network interface name.
 // Must be 1-15 characters, alphanumeric plus dots, hyphens, underscores.
 // No path traversal or special characters.
