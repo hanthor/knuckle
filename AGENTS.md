@@ -153,18 +153,38 @@ tui      ← cmd/knuckle
 
 ## Test Pyramid
 
-| Layer        | Where                                  | What                                                |
-| ------------ | -------------------------------------- | --------------------------------------------------- |
-| Unit         | `internal/**/_test.go`                 | Pure logic, fixture-driven                          |
-| Golden       | `internal/ignition/testdata/`          | Butane → Ignition output diffs (`-update` rewrites) |
-| Integration  | `//go:build integration` (not in CI)   | Real network: GitHub API, Flatcar release server    |
-| Headless e2e | `just headless-test`                   | Build + canned JSON config, runs on host (CI gate)  |
-| VM           | `just vm`                              | Install in QEMU, auto-boots installed system after  |
-| VM automated | `just vm-e2e`                          | 4-pass: DHCP, static network, sysext (docker), NVIDIA — fully automated |
-| ISO e2e      | `just e2e`                             | Build ISO → boot in QEMU → interactive install      |
+| Layer        | Where                                  | What                                                | Ghost? |
+| ------------ | -------------------------------------- | --------------------------------------------------- | ------ |
+| Unit         | `internal/**/_test.go`                 | Pure logic, fixture-driven                          | dev only |
+| Golden       | `internal/ignition/testdata/`          | Butane → Ignition output diffs (`-update` rewrites) | dev only |
+| Integration  | `//go:build integration` (not in CI)   | Real network: GitHub API, Flatcar release server    | dev only |
+| Headless e2e | `just headless-test`                   | Build + canned JSON config, runs on host (CI gate)  | ✅ ghost |
+| VM           | `just vm`                              | Install in QEMU, auto-boots installed system after  | local only (interactive TUI) |
+| VM automated | `just vm-e2e`                          | 4-pass: DHCP, static network, sysext (docker), NVIDIA — fully automated | ✅ ghost |
+| Ghost PR test | `scripts/qa-test-pr.sh <PR>`          | Per-PR: build + unit + VM dry-run + headless install, report to PR | ✅ ghost only |
+| ISO e2e      | `just e2e`                             | Build ISO → boot in QEMU GTK window → interactive install | local only (requires display) |
 
-CI today runs unit + race + lint + vuln + coverage gate. Integration and VM
-e2e are local-dev. See `docs/CI-AND-TESTING.md` for the matrix and roadmap.
+CI runs unit + race + lint + vuln + coverage gate. `just vm-e2e` and `scripts/qa-test-pr.sh` run on **ghost** (192.168.1.102). `just e2e`/`just vm` require a local display.
+
+### Ghost Testlab
+
+Ghost (192.168.1.102) is the dedicated headless QEMU host for VM-level testing:
+- Flatcar 4593.2.1 base image at `/var/tmp/knuckle-test/flatcar_base.img`
+- 32 KVM cores, 46 GB RAM available, 205 GB NVMe
+- Port range 2300–2315 reserved for PR test VMs
+- **`hostfwd` binds `127.0.0.1`** — all VM SSH must run FROM ghost, not through it
+- Full procedure: load `knuckle-qa` skill
+
+### Per-PR Verification Policy
+
+| PR labels | Minimum required before merge |
+|---|---|
+| `domain:ci`, `kind/test` only | `just ci` green |
+| `domain:validate`, `domain:model`, `domain:runner` | `just ci` green |
+| `domain:ignition`, `domain:headless`, `domain:wizard` | `just ci` + ghost Tier 1 (dry-run) |
+| `domain:install`, `domain:iso` | `just ci` + ghost Tier 2 (headless install) |
+| `domain:iso` | `just ci` + ghost Tier 3 (`hardware-repro`) |
+| `size:XL` or >4 domains | `just ci` + human `just vm-e2e` sign-off |
 
 ---
 
