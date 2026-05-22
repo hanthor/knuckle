@@ -192,6 +192,8 @@ Ghost (192.168.1.102) is the dedicated headless QEMU host for VM-level testing:
 
 **The bar:** Tier 3 means the installed system booted and responded to SSH. Evidence is quoted command output from inside that system — not build logs, not unit test output, not exit codes alone.
 
+> ⛔ Never queue a PR without a passing ghost test report. Code review approval alone is not sufficient.
+
 ---
 
 ## Working in this repo as an agent
