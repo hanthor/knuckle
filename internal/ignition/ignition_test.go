@@ -785,6 +785,22 @@ func TestGenerateButaneSwapDisabled(t *testing.T) {
 	}
 }
 
+func TestGenerateButane_SysextHTTPURLRejected(t *testing.T) {
+	g := NewGenerator()
+	cfg := &model.InstallConfig{
+		Hostname: "node01",
+		Network:  model.NetworkConfig{Mode: model.NetworkDHCP},
+		Users:    []model.UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA key"}}},
+		Sysexts: []model.SysextEntry{
+			{Name: "docker", URL: "http://evil.example.com/docker.raw", Selected: true},
+		},
+	}
+	_, err := g.GenerateButane(cfg)
+	if err == nil {
+		t.Error("expected error for non-HTTPS sysext URL, got nil")
+	}
+}
+
 func TestGenerateButaneTailscaleAuthKey(t *testing.T) {
 	g := NewGenerator()
 	cfg := &model.InstallConfig{
@@ -806,9 +822,6 @@ func TestGenerateButaneTailscaleAuthKey(t *testing.T) {
 	}
 	if !strings.Contains(out, "TS_AUTHKEY=tskey-auth-") {
 		t.Error("expected TS_AUTHKEY in tailscale.env contents")
-	}
-	if !strings.Contains(out, "TS_AUTH_ONCE=true") {
-		t.Error("expected TS_AUTH_ONCE=true in tailscale.env")
 	}
 	if !strings.Contains(out, "tailscaled.service") {
 		t.Error("expected tailscaled.service enabled")

@@ -2,6 +2,7 @@
 package validate
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net"
 	"regexp"
@@ -19,6 +20,7 @@ var (
 	reInterfaceName  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 	reGitHubUsername = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
 	reFlatcarVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	reSysextName     = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 	// Tailscale auth keys: tskey-auth-<id12>-<secret32+>; tskey-client- variant also accepted.
 	// See https://tailscale.com/kb/1085/auth-keys for the format.
 	reTailscaleAuthKey = regexp.MustCompile(`^tskey-(auth|client)-[A-Za-z0-9]{10,}-[A-Za-z0-9]{20,}$`)
@@ -87,12 +89,20 @@ func SSHPublicKey(s string) error {
 		"sk-ssh-ed25519@openssh.com",
 		"sk-ecdsa-sha2-nistp256@openssh.com",
 	}
+	validType := false
 	for _, t := range validTypes {
 		if parts[0] == t {
-			return nil
+			validType = true
+			break
 		}
 	}
-	return fmt.Errorf("unsupported SSH key type: %s", parts[0])
+	if !validType {
+		return fmt.Errorf("unsupported SSH key type: %s", parts[0])
+	}
+	if _, err := base64.StdEncoding.DecodeString(parts[1]); err != nil {
+		return fmt.Errorf("invalid SSH key: base64 payload is malformed")
+	}
+	return nil
 }
 
 // Username validates a Linux username.
@@ -324,6 +334,18 @@ func PasswordHash(s string) error {
 		}
 	}
 	return fmt.Errorf("password_hash must be a valid crypt hash (starting with $6$, $y$, $2b$, or $5$); got plain text or unsupported format")
+}
+
+// SysextName validates a sysext extension name used in Butane/Ignition paths.
+// Allows alphanumeric, hyphens, and underscores — no dots, slashes, or path traversal.
+func SysextName(s string) error {
+	if s == "" {
+		return fmt.Errorf("sysext name cannot be empty")
+	}
+	if !reSysextName.MatchString(s) {
+		return fmt.Errorf("invalid sysext name %q: must contain only alphanumeric, hyphens, or underscores", s)
+	}
+	return nil
 }
 
 // TailscaleRoutes validates a comma-separated list of CIDRs for --advertise-routes.

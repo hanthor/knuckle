@@ -50,7 +50,7 @@
 | `internal/probe`     |  81%  | 80%  | ≥ 85%                     |
 | `internal/wizard`    |  81%  | 70%  | ≥ 85%                     |
 | `internal/install`   |  76%  | 70%  | ≥ 80%                     |
-| `internal/tui`       |  52%  | 40%  | ≥ 70%                     |
+| `internal/tui`       |  80%  | 70%  | ≥ 85%                     |
 
 Gates are set conservatively below current numbers so CI fails on
 **regression**, not on aspirational drift. When a package's actual coverage
@@ -168,6 +168,42 @@ capture deterministic. On every run it writes:
 - `.vm/hardware-journal.log` — selected system journal from the live boot
 - `.vm/hardware-disk-inventory.log` — `lsblk` plus `/dev/disk/by-id` inventory
 - `.vm/hardware-installer-serial.log` — VM serial console output
+
+## Ghost Testlab (192.168.1.102)
+
+Ghost is the dedicated headless QEMU host for per-PR automated testing.
+See `docs/TEST-PLAN.md` for the full E2E scenario table.
+
+**Infrastructure:**
+- Flatcar 4593.2.1 base image: `/var/tmp/knuckle-test/flatcar_base.img`
+- 32 KVM cores, 46 GB RAM available, 205 GB NVMe (`/var/tmp`)
+- Test port range: 2300–2315 (auto-allocated by `scripts/qa-test-pr.sh`)
+
+**Critical: `hostfwd` binds `127.0.0.1` on ghost.**
+VM SSH must be issued from ghost itself — never from the dev workstation:
+```bash
+# correct:
+ssh jorge@ghost "ssh -o StrictHostKeyChecking=no -p 2307 core@127.0.0.1 'uname -r'"
+# wrong (reaches host sshd):
+ssh -p 2307 jorge@ghost
+```
+
+**Per-PR test harness:**
+```bash
+# Run from dev machine — builds locally, tests on ghost, outputs markdown report
+./scripts/qa-test-pr.sh <PR_NUMBER>
+
+# Publish report to PR
+gh pr comment <PR_NUMBER> --repo projectbluefin/knuckle --body-file /tmp/knuckle-qa-pr-<N>-report.md
+```
+
+Test tiers by domain label (see `knuckle-qa` skill for full matrix):
+| Labels | Tier | Runs |
+|---|---|---|
+| `validate`, `model`, `runner`, `wizard`, `tui`, etc. | 0 | `just ci` on dev machine |
+| `domain:probe`, `domain:security` | 1 | Tier 0 + ghost VM tool check + dry-run |
+| `domain:install`, `domain:headless`, `domain:ignition` | 2 | Tier 1 + real headless install on ghost |
+| `domain:iso` | 3 | Tier 2 + `hardware-repro` on ghost |
 
 ## Roadmap
 

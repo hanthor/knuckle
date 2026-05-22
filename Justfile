@@ -995,6 +995,13 @@ nvidia-check:
 release-preflight: ci
     #!/usr/bin/env bash
     set -euo pipefail
+
+# QA: full PR test — build + unit tests + Flatcar VM install + boot + domain assertions.
+# Artifacts saved to .qa/runs/pr-N-TIMESTAMP/. Failed runs generate an issue body.
+# Set QA_HOST=user@host to run on a remote machine; defaults to localhost.
+# Requires: QEMU with KVM, Flatcar base image (see docs/GHOST-LAB.md).
+qa-pr PR:
+    @scripts/qa-test-pr.sh "{{PR}}"
     echo ""
     echo "=== release-preflight ==="
     echo ""

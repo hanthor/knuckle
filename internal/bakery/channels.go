@@ -95,7 +95,8 @@ func fetchChannelInfoFromURLs(ctx context.Context, channel, versionURL, pkgURL s
 	if sbomUsed && sbomBody != "" {
 		digestURL := sbomURL + ".DIGESTS"
 		if digestBody, err := httpGet(ctx, digestURL); err == nil {
-			info.DigestVerified = verifySHA512(sbomBody, digestBody)
+			sbomFilename := sbomURL[strings.LastIndex(sbomURL, "/")+1:]
+			info.DigestVerified = verifySHA512(sbomBody, digestBody, sbomFilename)
 			// Cryptographic GPG verification against the embedded Flatcar key.
 			ascURL := digestURL + ".asc"
 			if ascBody, err := httpGet(ctx, ascURL); err == nil {
@@ -145,6 +146,8 @@ func FetchAllChannelsArch(ctx context.Context, arch string) ([]ChannelInfo, erro
 }
 
 // fetchAllChannelsWithURLFn is a helper for parallel channel fetching with custom URLs.
+// Channels that fail are skipped and a combined error is returned alongside the
+// partial results so callers can choose to proceed with what succeeded.
 func fetchAllChannelsWithURLFn(ctx context.Context, urlFn func(string) (string, string), channels ...string) ([]ChannelInfo, error) {
 	if len(channels) == 0 {
 		channels = []string{"stable", "beta", "alpha", "lts"}
@@ -160,7 +163,7 @@ func fetchAllChannelsWithURLFn(ctx context.Context, urlFn func(string) (string, 
 			vURL, pURL := urlFn(channel)
 			info, err := fetchChannelInfoFromURLs(ctx, channel, vURL, pURL)
 			if err != nil {
-				errs[idx] = err
+				errs[idx] = fmt.Errorf("%s: %w", channel, err)
 				return
 			}
 			results[idx] = *info
@@ -168,14 +171,25 @@ func fetchAllChannelsWithURLFn(ctx context.Context, urlFn func(string) (string, 
 	}
 	wg.Wait()
 
-	// Return first error encountered
-	for _, err := range errs {
+	// Collect successful results and accumulate per-channel errors.
+	var out []ChannelInfo
+	var firstErr error
+	for i, err := range errs {
 		if err != nil {
-			return nil, err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if results[i].Channel != "" {
+			out = append(out, results[i])
 		}
 	}
+	if firstErr != nil && len(out) == 0 {
+		return nil, firstErr
+	}
 
-	return results, nil
+	return out, firstErr
 }
 
 // httpGet performs a GET request with the shared client and returns the body as a string.
@@ -308,9 +322,10 @@ func extractVersionBeforeColons(line, prefix string) string {
 	return after
 }
 
-// verifySHA512 checks if the SHA512 hash of content matches the digest file.
-// The digest file format is: "<hash>  <filename>\n" per line.
-func verifySHA512(content, digestBody string) bool {
+// verifySHA512 checks if the SHA512 hash of content matches the digest file
+// for the expected filename. Both the hash and the filename field must match
+// to prevent hash-swap attacks within the same DIGESTS file.
+func verifySHA512(content, digestBody, expectedFilename string) bool {
 	hash := sha512.Sum512([]byte(content))
 	computed := hex.EncodeToString(hash[:])
 
@@ -329,7 +344,7 @@ func verifySHA512(content, digestBody string) bool {
 		if inSHA512 && line != "" {
 			// Format: "<hash>  <filename>"
 			parts := strings.Fields(line)
-			if len(parts) >= 1 && parts[0] == computed {
+			if len(parts) >= 2 && parts[0] == computed && parts[1] == expectedFilename {
 				return true
 			}
 		}
