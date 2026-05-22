@@ -13,6 +13,7 @@ import (
 	"github.com/projectbluefin/knuckle/internal/probe"
 	"github.com/projectbluefin/knuckle/internal/runner"
 	"github.com/projectbluefin/knuckle/internal/tui"
+	"github.com/projectbluefin/knuckle/internal/validate"
 	"github.com/projectbluefin/knuckle/internal/wizard"
 )
 
@@ -34,7 +35,7 @@ func main() {
 	)
 	flag.BoolVar(&dryRun, "dry-run", false, "simulate installation without writing to disk")
 	flag.StringVar(&logFile, "log-file", "/tmp/knuckle.log", "path to log file")
-	flag.StringVar(&channel, "channel", "stable", "Flatcar release channel (stable, beta, alpha, edge)")
+	flag.StringVar(&channel, "channel", "stable", "Flatcar release channel (stable, beta, alpha, lts, edge)")
 	flag.BoolVar(&showVer, "version", false, "print version and exit")
 	flag.StringVar(&configFile, "config", "", "path to JSON config file for headless install")
 	flag.BoolVar(&headlessMode, "headless", false, "run without TUI (requires --config)")
@@ -58,9 +59,8 @@ func main() {
 	}
 
 	// Validate channel flag
-	validChannels := map[string]bool{"stable": true, "beta": true, "alpha": true, "edge": true}
-	if !validChannels[channel] {
-		fmt.Fprintf(os.Stderr, "Error: invalid channel %q (must be stable, beta, alpha, or edge)\n", channel)
+	if err := validate.Channel(channel); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 

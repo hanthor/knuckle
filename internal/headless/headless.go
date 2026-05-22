@@ -188,6 +188,11 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Version
+	if err := validate.FlatcarVersion(c.Version); err != nil {
+		return fmt.Errorf("version: %w", err)
+	}
+
 	// Hostname
 	if c.Hostname != "" {
 		if err := validate.Hostname(c.Hostname); err != nil {
