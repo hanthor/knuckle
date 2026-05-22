@@ -237,9 +237,33 @@ log "Tier 1: tool check + dry-run..."
 # Write headless config to a local file and SCP through ghost into the VM.
 # This avoids multi-layer shell quoting of JSON — heredoc expands once cleanly.
 QA_CONFIG_FILE="/tmp/knuckle-qa-config-${PR}.json"
+
+# Base config
 cat > "${QA_CONFIG_FILE}" << JSONEOF
 {"channel":"stable","hostname":"qa-pr-${PR}","timezone":"UTC","network":{"mode":"dhcp"},"users":[{"username":"core","ssh_keys":["${HOST_KEY}"]}],"disk":"/dev/vdb","update_strategy":"off","reboot":false}
 JSONEOF
+
+# Inject swap config using 512 MiB — small enough to fit in the VM /var partition.
+# (Default 4 GiB exhausts the partition; 512 MiB is sufficient to verify the feature.)
+if echo "$TITLE $LABELS" | grep -qi "swap"; then
+  python3 - "${QA_CONFIG_FILE}" << 'PYEOF'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["swap"] = {"enabled": True, "size_mb": 512}
+json.dump(d, open(p, "w"))
+PYEOF
+fi
+
+if echo "$TITLE $LABELS" | grep -qi "tailscale"; then
+  python3 - "${QA_CONFIG_FILE}" << 'PYEOF'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["tailscale"] = {"auth_key": "tskey-auth-abcdef1234567890AB-CDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}
+json.dump(d, open(p, "w"))
+PYEOF
+fi
 
 # SCP config to ghost, then ghost SCPs it into the VM
 _scp_to $GOPTS "${QA_CONFIG_FILE}" "$GHOST:${WORK_REMOTE}/qa.json"
