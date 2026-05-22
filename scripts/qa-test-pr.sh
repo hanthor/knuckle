@@ -234,13 +234,16 @@ log "Installer VM ready"
 log "Tier 1: tool check + dry-run..."
 
 # Build the headless config — include feature-specific fields based on labels
-SWAP_FIELD=""; TS_FIELD=""
-echo "$TITLE $LABELS" | grep -qi "swap"      && SWAP_FIELD=',\"swap\":{\"enabled\":true,\"size_mb\":512}'
-echo "$TITLE $LABELS" | grep -qi "tailscale" && TS_FIELD=',\"tailscale\":{\"auth_key\":\"tskey-auth-abcdef1234567890AB-CDEFGHIJKLMNOPQRSTUVWXYZ0123456789\"}' 
+# Write headless config to a local file and SCP through ghost into the VM.
+# This avoids multi-layer shell quoting of JSON — heredoc expands once cleanly.
+QA_CONFIG_FILE="/tmp/knuckle-qa-config-${PR}.json"
+cat > "${QA_CONFIG_FILE}" << JSONEOF
+{"channel":"stable","hostname":"qa-pr-${PR}","timezone":"UTC","network":{"mode":"dhcp"},"users":[{"username":"core","ssh_keys":["${HOST_KEY}"]}],"disk":"/dev/vdb","update_strategy":"off","reboot":false}
+JSONEOF
 
-QA_CONFIG="{\"channel\":\"stable\",\"hostname\":\"qa-pr-${PR}\",\"timezone\":\"UTC\",\"network\":{\"mode\":\"dhcp\"},\"users\":[{\"username\":\"core\",\"ssh_keys\":[\"${HOST_KEY}\"]}],\"disk\":\"/dev/vdb\",\"update_strategy\":\"off\",\"reboot\":false${SWAP_FIELD}${TS_FIELD}}"
-
-_ghost "printf '%s\n' '${QA_CONFIG}' | ssh $GOPTS -p ${PORT} core@127.0.0.1 'cat > /tmp/qa.json'"
+# SCP config to ghost, then ghost SCPs it into the VM
+_scp_to $GOPTS "${QA_CONFIG_FILE}" "$GHOST:${WORK_REMOTE}/qa.json"
+_ghost "scp $GOPTS -P ${PORT} ${WORK_REMOTE}/qa.json core@127.0.0.1:/tmp/qa.json"
 
 T1=$(_ghost "
   ssh $GOPTS -p ${PORT} core@127.0.0.1 '
