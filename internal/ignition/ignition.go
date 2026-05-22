@@ -64,6 +64,11 @@ func (g *Generator) GenerateButane(cfg *model.InstallConfig) (string, error) {
 		}
 	}
 
+	swapSize := cfg.Swap.SizeMB
+	if cfg.Swap.Enabled && swapSize <= 0 {
+		swapSize = model.DefaultSwapSizeMB
+	}
+
 	data := templateData{
 		Hostname:            cfg.Hostname,
 		Timezone:            cfg.Timezone,
@@ -75,6 +80,8 @@ func (g *Generator) GenerateButane(cfg *model.InstallConfig) (string, error) {
 		RebootStrategy:      rebootStrategy,
 		HasPassword:         hasPassword,
 		NvidiaDriverVersion: cfg.NvidiaDriverVersion,
+		SwapEnabled:         cfg.Swap.Enabled,
+		SwapSizeMB:          swapSize,
 	}
 
 	var buf bytes.Buffer
@@ -96,6 +103,8 @@ type templateData struct {
 	RebootStrategy      string
 	HasPassword         bool
 	NvidiaDriverVersion string // e.g. "570-open"; empty = no NVIDIA kernel driver setup
+	SwapEnabled         bool
+	SwapSizeMB          int // effective swap size in MiB when SwapEnabled
 }
 
 func filterSelected(sysexts []model.SysextEntry) []model.SysextEntry {
@@ -164,6 +173,12 @@ storage:
         inline: |
           nvidia-drivers-{{.NvidiaDriverVersion | yamlEscape}}
 {{- end}}
+{{- if .SwapEnabled}}
+    - path: /var/swapfile
+      mode: 0600
+      contents:
+        source: "data:,"
+{{- end}}
 {{- if .Timezone}}
   links:
     - path: /etc/localtime
@@ -178,6 +193,39 @@ systemd:
 {{- end}}
     - name: update-engine.service
       enabled: true
+{{- if .SwapEnabled}}
+    - name: knuckle-create-swapfile.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Create the /var/swapfile (knuckle, {{.SwapSizeMB}} MiB)
+        Before=var-swapfile.swap
+        ConditionPathExists=!/var/lib/knuckle/.swap-created
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/bin/fallocate -l {{.SwapSizeMB}}M /var/swapfile
+        ExecStart=/usr/bin/chmod 0600 /var/swapfile
+        ExecStart=/usr/sbin/mkswap /var/swapfile
+        ExecStartPost=/bin/sh -c 'install -m 0644 -D /dev/null /var/lib/knuckle/.swap-created'
+        RemainAfterExit=yes
+
+        [Install]
+        WantedBy=multi-user.target
+    - name: var-swapfile.swap
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Activate /var/swapfile
+        Requires=knuckle-create-swapfile.service
+        After=knuckle-create-swapfile.service
+
+        [Swap]
+        What=/var/swapfile
+
+        [Install]
+        WantedBy=multi-user.target
+{{- end}}
 passwd:
   users:
 {{- if .Users}}

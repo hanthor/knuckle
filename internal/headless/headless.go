@@ -30,10 +30,19 @@ type Config struct {
 	Disk                string        `json:"disk"`
 	Sysexts             []string      `json:"sysexts,omitempty"`
 	NvidiaDriverVersion string        `json:"nvidia_driver_version,omitempty"` // e.g. "570-open"; empty = no NVIDIA kernel driver
+	Swap                *SwapConfig   `json:"swap,omitempty"`                  // nil = default-on (4 GiB); pass {"enabled":false} to disable
 	UpdateStrategy      string        `json:"update_strategy"`
 	IgnitionURL         string        `json:"ignition_url,omitempty"`
 	Reboot              bool          `json:"reboot"`
 	DryRun              bool          `json:"dry_run,omitempty"`
+}
+
+// SwapConfig for JSON input. Default (nil) ⇒ enabled with default size.
+// Pass {"enabled": false} to disable, or {"enabled": true, "size_mb": 8192}
+// for an explicit size.
+type SwapConfig struct {
+	Enabled bool `json:"enabled"`
+	SizeMB  int  `json:"size_mb,omitempty"` // 0 = use model.DefaultSwapSizeMB
 }
 
 // NetworkConfig for JSON input.
@@ -116,6 +125,13 @@ func (c *Config) ToInstallConfig() (*model.InstallConfig, error) {
 
 	// NVIDIA kernel driver series (empty = no NVIDIA setup)
 	cfg.NvidiaDriverVersion = c.NvidiaDriverVersion
+
+	// Swap: nil = default-on (matches wizard New() default).
+	if c.Swap == nil {
+		cfg.Swap = model.SwapConfig{Enabled: true, SizeMB: 0}
+	} else {
+		cfg.Swap = model.SwapConfig{Enabled: c.Swap.Enabled, SizeMB: c.Swap.SizeMB}
+	}
 
 	// Users
 	for _, u := range c.Users {
@@ -270,6 +286,11 @@ func (c *Config) Validate() error {
 	validStrategies := map[string]bool{"reboot": true, "off": true, "etcd-lock": true, "": true}
 	if !validStrategies[c.UpdateStrategy] {
 		return fmt.Errorf("update_strategy: must be reboot, off, or etcd-lock (got %q)", c.UpdateStrategy)
+	}
+
+	// Swap size must be non-negative if explicit
+	if c.Swap != nil && c.Swap.SizeMB < 0 {
+		return fmt.Errorf("swap.size_mb: must be ≥ 0 (got %d)", c.Swap.SizeMB)
 	}
 
 	// NVIDIA driver version must be a known series
