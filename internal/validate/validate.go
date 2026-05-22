@@ -20,6 +20,7 @@ var (
 	reInterfaceName  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 	reGitHubUsername = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
 	reFlatcarVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	reSysextName     = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 	// Tailscale auth keys: tskey-auth-<id12>-<secret32+>; tskey-client- variant also accepted.
 	// See https://tailscale.com/kb/1085/auth-keys for the format.
 	reTailscaleAuthKey = regexp.MustCompile(`^tskey-(auth|client)-[A-Za-z0-9]{10,}-[A-Za-z0-9]{20,}$`)
@@ -316,6 +317,18 @@ func FlatcarVersion(s string) error {
 	}
 	if !reFlatcarVersion.MatchString(s) {
 		return fmt.Errorf("invalid Flatcar version %q: must be MAJOR.MINOR.PATCH (e.g. 3510.2.8)", s)
+	}
+	return nil
+}
+
+// SysextName validates a sysext extension name used in Butane/Ignition paths.
+// Allows alphanumeric, hyphens, and underscores — no dots, slashes, or path traversal.
+func SysextName(s string) error {
+	if s == "" {
+		return fmt.Errorf("sysext name cannot be empty")
+	}
+	if !reSysextName.MatchString(s) {
+		return fmt.Errorf("invalid sysext name %q: must contain only alphanumeric, hyphens, or underscores", s)
 	}
 	return nil
 }
