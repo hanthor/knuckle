@@ -14,8 +14,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/projectbluefin/knuckle/internal/bakery"
 	"github.com/projectbluefin/knuckle/internal/github"
 	"github.com/projectbluefin/knuckle/internal/model"
@@ -189,23 +187,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = fmt.Errorf("%w — edit the username and press Enter to retry, or clear it and add an SSH key or password instead", msg.err)
 			return m, nil
 		}
-		cfg := &m.Wizard.State.Config
-		// Merge GitHub keys with local host keys AND manual keys (deduped)
-		allKeys := mergeKeys(detectLocalSSHKeys(), splitSSHKeys(m.sshKeyInput), msg.keys)
-		cfg.SSHKeys = allKeys
-		if len(cfg.Users) > 0 {
-			cfg.Users[0].SSHKeys = allKeys
-		}
-		// Guard: don't advance if we have no authentication method at all.
-		// This catches the case where GitHub returned 0 keys and no other auth is set.
-		hasAuth := len(allKeys) > 0
-		for _, u := range cfg.Users {
-			if u.PasswordHash != "" {
-				hasAuth = true
-				break
-			}
-		}
-		if !hasAuth {
+		m.Wizard.ApplyGitHubKeys(msg.keys, detectLocalSSHKeys(), m.sshKeyInput)
+		if !m.Wizard.HasAnyAuthentication() {
 			m.err = fmt.Errorf("no SSH keys found — add a key manually, set a password, or use a GitHub user with public keys")
 			return m, nil
 		}
@@ -1264,30 +1247,12 @@ func Run(w *wizard.Wizard, rebootFn func(context.Context) error) error {
 	return err
 }
 
-// hashPassword generates a bcrypt hash suitable for Ignition passwd field.
-func hashPassword(plain string) (string, error) {
-	if len(plain) > 72 {
-		return "", fmt.Errorf("password too long (max 72 bytes for bcrypt)")
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
-	if err != nil {
-		return "", fmt.Errorf("hashing password: %w", err)
-	}
-	return string(hash), nil
-}
+// hashPassword is a thin wrapper around wizard.HashPassword kept so existing
+// TUI tests/usages don't churn; new code should call wizard.HashPassword.
+func hashPassword(plain string) (string, error) { return wizard.HashPassword(plain) }
 
-// splitSSHKeys splits SSH keys by semicolons and trims whitespace.
-func splitSSHKeys(input string) []string {
-	parts := strings.Split(input, ";")
-	var keys []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			keys = append(keys, p)
-		}
-	}
-	return keys
-}
+// splitSSHKeys is a thin wrapper around wizard.SplitSSHKeys.
+func splitSSHKeys(input string) []string { return wizard.SplitSSHKeys(input) }
 
 // detectLocalSSHKeys finds SSH public keys on the installer host.
 // Checks ~/.ssh/*.pub for common key types.
@@ -1315,17 +1280,5 @@ func detectLocalSSHKeys() []string {
 	return keys
 }
 
-// mergeKeys combines two key slices, deduplicating by key content.
-func mergeKeys(sources ...[]string) []string {
-	seen := make(map[string]bool)
-	var result []string
-	for _, src := range sources {
-		for _, k := range src {
-			if !seen[k] {
-				seen[k] = true
-				result = append(result, k)
-			}
-		}
-	}
-	return result
-}
+// mergeKeys is a thin wrapper around wizard.MergeSSHKeys.
+func mergeKeys(sources ...[]string) []string { return wizard.MergeSSHKeys(sources...) }
