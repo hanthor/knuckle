@@ -9,7 +9,7 @@
 #   Ubuntu:  sudo apt-get install -y xorriso mtools cpio systemd-boot-efi
 #   Fedora:  sudo dnf install -y xorriso mtools cpio systemd-boot-unsigned
 #
-# Usage: ./scripts/build-iso.sh [--channel stable|beta|alpha|lts] [--arch amd64|arm64] [--binary /path/to/knuckle]
+# Usage: ./scripts/build-iso.sh [--channel stable|beta|alpha|lts|edge] [--arch amd64|arm64] [--binary /path/to/knuckle]
 set -euo pipefail
 
 # ── Argument parsing ─────────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
         --arch)      ARCH="$2"; shift 2 ;;
         --binary=*)  BINARY_OVERRIDE="${1#--binary=}"; shift ;;
         --binary)    BINARY_OVERRIDE="$2"; shift 2 ;;
-        stable|beta|alpha|lts) CHANNEL="$1"; shift ;;
+        stable|beta|alpha|lts|edge) CHANNEL="$1"; shift ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
@@ -34,6 +34,10 @@ done
 if [[ "$ARCH" != "amd64" && "$ARCH" != "arm64" ]]; then
     echo "error: --arch must be amd64 or arm64 (got '$ARCH')" >&2; exit 1
 fi
+case "$CHANNEL" in
+    stable|beta|alpha|lts|edge) ;;
+    *) echo "error: --channel must be stable, beta, alpha, lts, or edge (got '$CHANNEL')" >&2; exit 1 ;;
+esac
 if [[ "$ARCH" == "arm64" && "$CHANNEL" == "lts" ]]; then
     echo "error: LTS channel is not available for arm64" >&2; exit 1
 fi

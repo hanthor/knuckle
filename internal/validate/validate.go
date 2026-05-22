@@ -12,11 +12,13 @@ import (
 
 // Compiled regex patterns — evaluated once at init to catch malformed patterns early.
 var (
-	reHostname      = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
-	reUsername      = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
-	reTimezone      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_/+-]*$`)
-	reGroupName     = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
-	reInterfaceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+	reHostname       = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
+	reUsername       = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
+	reTimezone       = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_/+-]*$`)
+	reGroupName      = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
+	reInterfaceName  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+	reGitHubUsername = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
+	reFlatcarVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 )
 
 // Hostname validates a Linux hostname (RFC 1123).
@@ -259,6 +261,37 @@ func CheckConsistency(cfg *model.InstallConfig) error {
 		}
 	}
 
+	return nil
+}
+
+// GitHubUsername validates a GitHub username.
+// GitHub rules: 1-39 chars, alphanumeric and hyphens, no consecutive hyphens,
+// cannot start or end with a hyphen.
+func GitHubUsername(s string) error {
+	if s == "" {
+		return fmt.Errorf("GitHub username cannot be empty")
+	}
+	if len(s) > 39 {
+		return fmt.Errorf("GitHub username too long (max 39 characters)")
+	}
+	if !reGitHubUsername.MatchString(s) {
+		return fmt.Errorf("invalid GitHub username %q: must be alphanumeric with hyphens, cannot start or end with a hyphen", s)
+	}
+	if strings.Contains(s, "--") {
+		return fmt.Errorf("invalid GitHub username %q: consecutive hyphens not allowed", s)
+	}
+	return nil
+}
+
+// FlatcarVersion validates a pinned Flatcar version string.
+// Must be empty (latest) or in MAJOR.MINOR.PATCH format.
+func FlatcarVersion(s string) error {
+	if s == "" {
+		return nil // empty = use latest
+	}
+	if !reFlatcarVersion.MatchString(s) {
+		return fmt.Errorf("invalid Flatcar version %q: must be MAJOR.MINOR.PATCH (e.g. 3510.2.8)", s)
+	}
 	return nil
 }
 

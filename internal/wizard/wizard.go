@@ -160,7 +160,7 @@ func (w *Wizard) validateWelcome() error {
 		return err
 	}
 	if w.State.Config.IgnitionURL != "" {
-		if err := validate.URL(w.State.Config.IgnitionURL); err != nil {
+		if err := validate.IgnitionURL(w.State.Config.IgnitionURL); err != nil {
 			return fmt.Errorf("ignition URL: %w", err)
 		}
 	}

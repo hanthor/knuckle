@@ -109,6 +109,12 @@ jobs:
           path: cover.out
           retention-days: 14
 
+      - name: upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./cover.out
+          fail_ci_if_error: false
+
   headless-e2e:
     name: headless e2e (dry-run)
     runs-on: ubuntu-latest
