@@ -195,6 +195,15 @@ func (m *Model) reviewSummary() string {
 		}
 		fmt.Fprintf(&b, "\nSysexts: %s", strings.Join(names, ", "))
 	}
+	if cfg.Swap.Enabled {
+		size := cfg.Swap.SizeMB
+		if size <= 0 {
+			size = model.DefaultSwapSizeMB
+		}
+		fmt.Fprintf(&b, "\nSwap: %d MiB (/var/swapfile)", size)
+	} else {
+		b.WriteString("\nSwap: disabled")
+	}
 	return b.String()
 }
 
