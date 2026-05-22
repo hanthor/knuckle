@@ -366,3 +366,21 @@ func TestFetchAllChannelsArch_InvalidArch(t *testing.T) {
 		t.Fatal("expected error for unsupported arch")
 	}
 }
+
+func TestFetchChannelInfoWrapper(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := FetchChannelInfo(ctx, "stable")
+	if err == nil {
+		t.Fatal("FetchChannelInfo with cancelled context: expected error, got nil")
+	}
+}
+
+func TestFetchAllChannelsWrapper(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := FetchAllChannels(ctx)
+	if err == nil {
+		t.Fatal("FetchAllChannels with cancelled context: expected error, got nil")
+	}
+}

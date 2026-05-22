@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1506,8 +1507,60 @@ func TestValidate_ValidGitHubUsername(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		// Should pass format check (SSH key fetch happens at Run time, not Validate)
-		if !strings.Contains(err.Error(), "github_user") {
-			t.Errorf("unexpected error (not about github_user): %v", err)
-		}
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_SwapNegativeSize(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vda",
+		Users:   []UserConfig{{Username: "core", Password: "hunter2"}},
+		Swap:    &SwapConfig{Enabled: true, SizeMB: -1},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for negative swap size, got nil")
+	}
+}
+
+func TestValidate_TailscaleInvalidKey(t *testing.T) {
+	cfg := &Config{
+		Channel:   "stable",
+		Disk:      "/dev/vda",
+		Users:     []UserConfig{{Username: "core", Password: "hunter2"}},
+		Tailscale: TailscaleConfig{AuthKey: "not-a-real-key"},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for invalid Tailscale auth key, got nil")
+	}
+}
+
+func TestValidate_TailscaleSubnetRouterNoRoutes(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vda",
+		Users:   []UserConfig{{Username: "core", Password: "hunter2"}},
+		Tailscale: TailscaleConfig{
+			AuthKey: "tskey-auth-kExampleKeyID1-ExampleSecretThatIsLongEnough123",
+			Mode:    "subnet-router",
+			Routes:  "",
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for subnet router with no routes, got nil")
+	}
+}
+
+func TestRun_InstallerError(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vda",
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAA key"}}},
+	}
+	failMock := &mockInstaller{installErr: fmt.Errorf("disk write failed")}
+	err := Run(context.Background(), cfg, failMock, logger)
+	if err == nil {
+		t.Fatal("expected error from installer failure, got nil")
 	}
 }

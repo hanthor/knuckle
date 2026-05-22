@@ -286,3 +286,10 @@ func TestDetectNvidiaGPUs_ErrorFromClient(t *testing.T) {
 		t.Errorf("expected nil on error, got %v", gpus)
 	}
 }
+
+func TestDetectNvidiaGPUs_Smoke(t *testing.T) {
+	// On CI (no NVIDIA hardware) this returns nil — that is a valid result.
+	// Test only verifies it does not panic.
+	result := DetectNvidiaGPUs()
+	_ = result
+}
