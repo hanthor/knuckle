@@ -9,6 +9,7 @@ import (
 	"github.com/projectbluefin/knuckle/internal/github"
 	"github.com/projectbluefin/knuckle/internal/model"
 	"github.com/projectbluefin/knuckle/internal/validate"
+	"github.com/projectbluefin/knuckle/internal/wizard"
 )
 
 // initForm sets up the huh form for form-based steps.
@@ -80,61 +81,32 @@ func (m *Model) onFormComplete() tea.Cmd {
 		}
 
 	case model.StepNetwork:
-		if m.dnsInput != "" {
-			cfg.Network.DNS = strings.Split(m.dnsInput, ",")
-		}
-		if m.networkModeInput == "static" {
-			cfg.Network.Mode = model.NetworkStatic
-		} else {
-			cfg.Network.Mode = model.NetworkDHCP
-		}
+		m.Wizard.ApplyNetworkStep(wizard.NetworkStepInput{
+			Mode: m.networkModeInput,
+			DNS:  m.dnsInput,
+		})
 
 	case model.StepUser:
-		// Apply username
-		if m.usernameInput != "" {
-			if len(cfg.Users) == 0 {
-				cfg.Users = append(cfg.Users, model.UserConfig{
-					Username: m.usernameInput,
-					Groups:   []string{"sudo", "docker"},
-				})
-			} else {
-				cfg.Users[0].Username = m.usernameInput
-			}
+		if err := m.Wizard.ApplyUserStep(wizard.UserStepInput{
+			Username:  m.usernameInput,
+			Password:  m.passwordInput,
+			ManualKey: m.sshKeyInput,
+			LocalKeys: detectLocalSSHKeys(),
+			Hostname:  cfg.Hostname,
+			Timezone:  cfg.Timezone,
+		}); err != nil {
+			m.err = err
+			m.initForm()
+			return m.activeForm.Init()
 		}
-		// Apply password
-		if m.passwordInput != "" && len(cfg.Users) > 0 {
-			hash, err := hashPassword(m.passwordInput)
-			if err != nil {
-				m.err = err
-				m.initForm()
-				return m.activeForm.Init()
-			}
-			cfg.Users[0].PasswordHash = hash
-		}
-		// Apply SSH key (manual input + local host keys)
-		manualKeys := splitSSHKeys(m.sshKeyInput)
-		localKeys := detectLocalSSHKeys()
-		allKeys := mergeKeys(localKeys, manualKeys)
-		if len(allKeys) > 0 {
-			cfg.SSHKeys = allKeys
-			if len(cfg.Users) > 0 {
-				cfg.Users[0].SSHKeys = allKeys
-			}
-		}
-		// Async GitHub key fetch (merges with local keys on return)
+		// Async GitHub key fetch (merges with local + manual keys on return)
 		if m.githubUserInput != "" {
 			m.fetching = true
-			username := m.githubUserInput
-			// Strip @ prefix if present
-			username = strings.TrimPrefix(username, "@")
+			username := strings.TrimPrefix(m.githubUserInput, "@")
 			return func() tea.Msg {
 				keys, err := github.FetchKeys(username)
 				return fetchKeysMsg{keys: keys, err: err}
 			}
-		}
-		// Apply timezone
-		if cfg.Timezone == "" {
-			cfg.Timezone = "UTC"
 		}
 
 	case model.StepTailscale:
