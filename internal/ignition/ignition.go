@@ -1,6 +1,24 @@
 // Package ignition generates Butane YAML configs from InstallConfig.
 // The generated YAML is Flatcar variant, spec 1.1.0, compiled to Ignition
 // JSON via the coreos/butane Go library (not the CLI, which isn't on Flatcar).
+//
+// # Adding a new conditional section
+//
+// Historical state: a single multi-hundred-line raw string template held every
+// section (storage, systemd, passwd). New features had to be hand-indented in
+// the right place, and template errors only surfaced at render time (#88).
+//
+// Going forward: new features should use the [Builder] in builder.go.
+// Each feature contributes its YAML fragment via [Builder.AddStorageFile],
+// [Builder.AddStorageLink], or [Builder.AddSystemdUnit]; the Builder takes
+// care of indentation and assembly. The Builder is end-to-end tested against
+// [CompileToIgnition] so fragments that aren't valid Butane fail at unit-test
+// time.
+//
+// [GenerateButane] still uses the legacy butaneTemplate for the existing
+// surface (network, sysexts, NVIDIA, swap, Tailscale) — those will migrate
+// in follow-up changes as the surrounding code is touched. New surface should
+// be added via the Builder, not by extending butaneTemplate.
 package ignition
 
 import (
