@@ -1909,3 +1909,32 @@ func TestValidateTailscale_SubnetRouterRequiresRoutes(t *testing.T) {
 		t.Fatal("expected error for subnet router with no routes, got nil")
 	}
 }
+
+func TestIsTailscaleSelected_True(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "docker", Selected: true},
+		{Name: "tailscale", Selected: true},
+	}
+	if !w.isTailscaleSelected() {
+		t.Error("expected isTailscaleSelected=true when tailscale is selected")
+	}
+}
+
+func TestIsTailscaleSelected_False_NotSelected(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "tailscale", Selected: false},
+	}
+	if w.isTailscaleSelected() {
+		t.Error("expected isTailscaleSelected=false when tailscale is not selected")
+	}
+}
+
+func TestIsTailscaleSelected_False_Empty(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.Sysexts = nil
+	if w.isTailscaleSelected() {
+		t.Error("expected isTailscaleSelected=false when no sysexts")
+	}
+}

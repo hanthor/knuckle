@@ -385,3 +385,107 @@ func TestFetchAllChannelsWrapper(t *testing.T) {
 		t.Fatalf("FetchAllChannels with cancelled context: got %v, want context.Canceled", err)
 	}
 }
+
+// ── parsePackageList ──────────────────────────────────────────────────────────
+
+func TestParsePackageList_Ignition_RevisionStripped(t *testing.T) {
+	body := "sys-apps/ignition-2.19.0-r2::coreos-overlay\n"
+	info := &ChannelInfo{}
+	parsePackageList(body, info)
+	if info.Ignition != "2.19.0" {
+		t.Errorf("ignition version = %q, want %q (revision should be stripped)", info.Ignition, "2.19.0")
+	}
+}
+
+func TestParsePackageList_AllPackages(t *testing.T) {
+	body := `sys-kernel/coreos-kernel-6.12.81::coreos-overlay
+sys-apps/systemd-255.13::portage-stable
+sys-apps/ignition-2.19.0::coreos-overlay
+dev-db/etcd-3.5.18::portage-stable
+app-misc/unrelated-1.0.0::portage-stable
+`
+	info := &ChannelInfo{}
+	parsePackageList(body, info)
+	if info.Kernel != "6.12.81" {
+		t.Errorf("Kernel = %q, want 6.12.81", info.Kernel)
+	}
+	if info.Systemd != "255.13" {
+		t.Errorf("Systemd = %q, want 255.13", info.Systemd)
+	}
+	if info.Ignition != "2.19.0" {
+		t.Errorf("Ignition = %q, want 2.19.0", info.Ignition)
+	}
+	if info.Etcd != "3.5.18" {
+		t.Errorf("Etcd = %q, want 3.5.18", info.Etcd)
+	}
+}
+
+// ── parseSysextPackageList ────────────────────────────────────────────────────
+
+func TestParseSysextPackageList_DockerAndContainerd(t *testing.T) {
+	body := `app-containers/docker-28.0.4::portage-stable
+app-containers/containerd-2.1.5::portage-stable
+`
+	info := &ChannelInfo{}
+	parseSysextPackageList(body, info)
+	if info.Docker != "28.0.4" {
+		t.Errorf("Docker = %q, want 28.0.4", info.Docker)
+	}
+	if info.Containerd != "2.1.5" {
+		t.Errorf("Containerd = %q, want 2.1.5", info.Containerd)
+	}
+}
+
+func TestParseSysextPackageList_SkipsDockerCLIAndBuildx(t *testing.T) {
+	body := `app-containers/docker-cli-28.0.4::portage-stable
+app-containers/docker-buildx-0.14.0::portage-stable
+app-containers/docker-28.0.4::portage-stable
+`
+	info := &ChannelInfo{}
+	parseSysextPackageList(body, info)
+	// docker-cli and docker-buildx lines should be skipped; real docker matches
+	if info.Docker != "28.0.4" {
+		t.Errorf("Docker = %q, want 28.0.4 (cli/buildx lines should be skipped)", info.Docker)
+	}
+}
+
+// ── extractVersionBeforeColons ────────────────────────────────────────────────
+
+func TestExtractVersionBeforeColons_WithColons(t *testing.T) {
+	got := extractVersionBeforeColons("sys-kernel/coreos-kernel-6.12.81::coreos-overlay", "sys-kernel/coreos-kernel-")
+	if got != "6.12.81" {
+		t.Errorf("got %q, want 6.12.81", got)
+	}
+}
+
+func TestExtractVersionBeforeColons_WithoutColons(t *testing.T) {
+	// Fallback: no "::" → return everything after prefix
+	got := extractVersionBeforeColons("sys-kernel/coreos-kernel-6.12.81", "sys-kernel/coreos-kernel-")
+	if got != "6.12.81" {
+		t.Errorf("got %q, want 6.12.81", got)
+	}
+}
+
+func TestParseSBOMJSON_InvalidJSON(t *testing.T) {
+	// Invalid JSON silently falls back — function must not panic.
+	info := &ChannelInfo{}
+	parseSBOMJSON("not valid json {{{", info)
+	if info.Kernel != "" {
+		t.Errorf("invalid JSON: Kernel should be empty, got %q", info.Kernel)
+	}
+}
+
+func TestParseSBOMJSON_IgnitionRevisionStripped(t *testing.T) {
+	body := `{"packages":[
+		{"name":"sys-apps/ignition","versionInfo":"2.19.0-r3"},
+		{"name":"dev-db/etcd","versionInfo":"3.5.18"}
+	]}`
+	info := &ChannelInfo{}
+	parseSBOMJSON(body, info)
+	if info.Ignition != "2.19.0" {
+		t.Errorf("Ignition = %q, want 2.19.0 (revision stripped)", info.Ignition)
+	}
+	if info.Etcd != "3.5.18" {
+		t.Errorf("Etcd = %q, want 3.5.18", info.Etcd)
+	}
+}
