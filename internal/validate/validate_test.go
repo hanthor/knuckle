@@ -519,3 +519,60 @@ func TestCheckConsistency(t *testing.T) {
 		})
 	}
 }
+
+func TestGitHubUsername(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid simple", "torvalds", false},
+		{"valid with hyphen", "john-doe", false},
+		{"valid with numbers", "user123", false},
+		{"valid single char", "a", false},
+		{"valid max length 39", strings.Repeat("a", 39), false},
+		{"empty", "", true},
+		{"too long 40", strings.Repeat("a", 40), true},
+		{"leading hyphen", "-user", true},
+		{"trailing hyphen", "user-", true},
+		{"consecutive hyphens", "john--doe", true},
+		{"contains underscore", "user_name", true},
+		{"contains dot", "user.name", true},
+		{"contains space", "user name", true},
+		{"contains slash", "user/name", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := GitHubUsername(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GitHubUsername(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestFlatcarVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"empty is latest", "", false},
+		{"valid semver", "3510.2.8", false},
+		{"valid zeros", "0.0.0", false},
+		{"valid large", "9999.99.99", false},
+		{"missing patch", "3510.2", true},
+		{"with v prefix", "v3510.2.8", true},
+		{"alpha string", "latest", true},
+		{"extra segment", "3510.2.8.1", true},
+		{"leading dot", ".3510.2.8", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := FlatcarVersion(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("FlatcarVersion(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}

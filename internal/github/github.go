@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/projectbluefin/knuckle/internal/validate"
 )
 
 // KeyFetcher fetches SSH public keys for a user.
@@ -34,6 +36,9 @@ func NewClient() *Client {
 func (c *Client) FetchKeys(ctx context.Context, username string) ([]string, error) {
 	if username == "" {
 		return nil, fmt.Errorf("empty GitHub username")
+	}
+	if err := validate.GitHubUsername(username); err != nil {
+		return nil, err
 	}
 
 	url := fmt.Sprintf("%s/%s.keys", c.BaseURL, username)
