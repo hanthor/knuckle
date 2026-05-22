@@ -1877,6 +1877,7 @@ func TestFetchChannels_CancelledContext(t *testing.T) {
 
 func TestValidateTailscale_EmptyKeyAllowed(t *testing.T) {
 	w, _, _, _ := newTestWizard()
+	w.State.Config.Sysexts = []model.SysextEntry{{Name: "tailscale", Selected: true}}
 	w.State.CurrentStep = model.StepTailscale
 	w.State.Config.Tailscale.AuthKey = ""
 	if err := w.ValidateCurrentStep(); err != nil {

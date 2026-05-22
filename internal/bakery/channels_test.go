@@ -2,6 +2,7 @@ package bakery
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -371,8 +372,8 @@ func TestFetchChannelInfoWrapper(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := FetchChannelInfo(ctx, "stable")
-	if err == nil {
-		t.Fatal("FetchChannelInfo with cancelled context: expected error, got nil")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("FetchChannelInfo with cancelled context: got %v, want context.Canceled", err)
 	}
 }
 
@@ -380,7 +381,7 @@ func TestFetchAllChannelsWrapper(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := FetchAllChannels(ctx)
-	if err == nil {
-		t.Fatal("FetchAllChannels with cancelled context: expected error, got nil")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("FetchAllChannels with cancelled context: got %v, want context.Canceled", err)
 	}
 }
