@@ -1,506 +1,678 @@
 #!/usr/bin/env bash
 # scripts/qa-test-pr.sh — Knuckle PR ghost testlab harness
 #
-# Usage:
-#   ./scripts/qa-test-pr.sh <PR_NUMBER>
+# Invoked via: just qa-pr <PR_NUMBER>
 #
-# Full QA science: build → unit tests → installer VM → headless install →
-# BOOT the installed system → domain-specific assertions with quoted evidence.
+# Build → unit tests → installer VM → headless install → boot installed
+# Flatcar → domain assertions with quoted evidence → run artifacts saved.
 #
-# Exit codes:
-#   0 — all tests and assertions passed
-#   1 — any test or assertion failed
-#   2 — PR is too complex; skip (human just vm-e2e required)
+# Exit codes: 0 = all pass | 1 = failure | 2 = complex PR (skip)
 
 set -euo pipefail
 
 PR=${1:?usage: qa-test-pr.sh <PR_NUMBER>}
 
-GHOST_HOST=192.168.1.102
-GHOST_USER=jorge
-GHOST="$GHOST_USER@$GHOST_HOST"
+# QA_HOST: set to user@hostname to run on a remote machine.
+# Leave unset (or set to localhost) to run entirely on this machine.
+# Example: export QA_HOST=jorge@192.168.1.102
+# See docs/GHOST-LAB.md for lab setup instructions.
+GHOST=${QA_HOST:-localhost}
 GOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
-FLATCAR_BASE="/var/tmp/knuckle-test/flatcar_base.img"
-WORK="/var/tmp/knuckle-qa-pr-${PR}"
-REPORT="/tmp/knuckle-qa-pr-${PR}-report.md"
+BASE_IMG="${QA_FLATCAR_BASE:-/var/tmp/knuckle-test/flatcar_base.img}"
+WORK_REMOTE="/var/tmp/knuckle-qa-pr-${PR}"
+RUN_ID="pr-${PR}-$(date +%Y%m%d-%H%M%S)"
+RUNDIR=".qa/runs/${RUN_ID}"
+REPORT="${RUNDIR}/report.md"
 START=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 _ghost()     { ssh $GOPTS "$GHOST" "$@"; }
-_ghost_scp() { scp $GOPTS "$@"; }
-log()        { echo "  [qa] $*" >&2; }
+_scp_to()    { scp $GOPTS "$@"; }
+_scp_from()  { scp $GOPTS "$@"; }
+log()        { echo "  [qa ${RUN_ID}] $*" >&2; }
+
+mkdir -p "$RUNDIR"
 
 # ── 1. PR metadata ────────────────────────────────────────────────────────────
 log "Fetching PR #${PR}..."
-TITLE=$(gh pr view "$PR" --repo projectbluefin/knuckle --json title   --jq '.title'             2>/dev/null)
-BRANCH=$(gh pr view "$PR" --repo projectbluefin/knuckle --json headRefName --jq '.headRefName'  2>/dev/null)
-LABELS=$(gh pr view "$PR" --repo projectbluefin/knuckle --json labels  --jq '[.labels[].name] | join(", ")' 2>/dev/null || echo "")
-SIZE=$(  gh pr view "$PR" --repo projectbluefin/knuckle --json labels  --jq '[.labels[] | select(.name|startswith("size:")) | .name] | first // ""' 2>/dev/null || echo "")
-CLOSES=$(gh pr view "$PR" --repo projectbluefin/knuckle --json body    --jq '.body' 2>/dev/null | grep -oP 'Closes #\K\d+' | tr '\n' ',' | sed 's/,$//' || echo "")
-AUTHOR=$(gh pr view "$PR" --repo projectbluefin/knuckle --json author  --jq '.author.login'     2>/dev/null || echo "unknown")
+PR_JSON=$(gh pr view "$PR" --repo projectbluefin/knuckle \
+  --json title,headRefName,labels,body,author 2>/dev/null)
+TITLE=$(  echo "$PR_JSON" | jq -r '.title')
+BRANCH=$( echo "$PR_JSON" | jq -r '.headRefName')
+AUTHOR=$( echo "$PR_JSON" | jq -r '.author.login')
+LABELS=$( echo "$PR_JSON" | jq -r '[.labels[].name] | join(", ")')
+SIZE=$(   echo "$PR_JSON" | jq -r '[.labels[] | select(.name|startswith("size:")) | .name] | first // ""')
+CLOSES=$( echo "$PR_JSON" | jq -r '.body' | grep -oP 'Closes #\K\d+' | tr '\n' ',' | sed 's/,$//' || echo "")
+DOMAIN_COUNT=$(echo "$LABELS" | tr ',' '\n' | grep -c "domain:" || true)
+WF_CHANGED=$(gh pr diff "$PR" --repo projectbluefin/knuckle --name-only 2>/dev/null \
+  | grep -c "^\.github/workflows/" || true)
 
 # ── 2. Complexity gate ────────────────────────────────────────────────────────
-DOMAIN_COUNT=$(echo "$LABELS" | tr ',' '\n' | grep -c "domain:" || true)
-WF_CHANGE=$(gh pr diff "$PR" --repo projectbluefin/knuckle --name-only 2>/dev/null | grep -c "^\.github/workflows/" || true)
+if [[ "$SIZE" == "size:XL" ]] || [[ $DOMAIN_COUNT -gt 4 ]] || [[ $WF_CHANGED -gt 0 ]]; then
+  log "SKIP: complexity gate (size=${SIZE} domains=${DOMAIN_COUNT} wf=${WF_CHANGED})"
+  cat > "$REPORT" << EOF
+## 🧪 Ghost Testlab — PR #${PR} SKIPPED
 
-if [[ "$SIZE" == "size:XL" ]] || [[ $DOMAIN_COUNT -gt 4 ]] || [[ $WF_CHANGE -gt 0 ]]; then
-  cat <<SKIP
-## 🧪 Ghost Testlab — PR #${PR} SKIPPED (complexity gate)
-
-**Reason:** Too complex for automated ghost testing.
-- Size: ${SIZE}  Domains: ${DOMAIN_COUNT}  Workflow file changes: ${WF_CHANGE}
-
-**Required:** Human `just vm-e2e` verification on ghost (192.168.1.102) before merge.
-Checklist: `just tools && just ci && just vm-e2e`
-SKIP
-  exit 2
+**Reason:** Complexity gate — size: ${SIZE}, domains: ${DOMAIN_COUNT}, workflow changes: ${WF_CHANGED}
+**Required:** Human \`just vm-e2e\` on ghost (192.168.1.102) before merge.
+EOF
+  cat "$REPORT"; exit 2
 fi
 
-# ── 3. Tier selection — what needs boot verification ─────────────────────────
-# Tier 0: unit tests only (CI, docs, pure validator changes)
-# Tier 1: installer VM + tool check + --dry-run (no flatcar-install)
-# Tier 3: FULL — install to disk + BOOT installed system + domain assertions
-#   (there is no standalone tier 2; it is internal to tier 3)
+# ── 3. What to test ───────────────────────────────────────────────────────────
+# Tier 0: unit tests (dev machine only)
+# Tier 1: installer VM + tool check + --dry-run + security bad-input tests
+# Tier 3: Tier 1 + real headless install + BOOT installed Flatcar + assertions
+#   (Tier 3 is the default for any PR touching the installed system)
 
 TIER=0
 NEEDS_BOOT=0
+DO_SECURITY=0
 
-echo "$LABELS" | grep -qE "domain:probe|domain:tui"              && TIER=1
-echo "$LABELS" | grep -q  "domain:security"                      && TIER=1 && SECURITY_TESTS=1 || SECURITY_TESTS=0
-echo "$LABELS" | grep -qE "domain:install|domain:iso"            && TIER=3 && NEEDS_BOOT=1
-echo "$LABELS" | grep -qE "domain:ignition|domain:headless"      && TIER=3 && NEEDS_BOOT=1
-echo "$LABELS" | grep -qE "domain:wizard|domain:tui"             && [[ $TIER -lt 1 ]] && TIER=1
-echo "$LABELS" | grep -q  "domain:sysext"                        && TIER=3 && NEEDS_BOOT=1
+_has() { echo "$LABELS" | grep -q "$1"; }
 
-# Derive which domain assertions to run from labels
-RUN_ASSERT_INSTALL=0; RUN_ASSERT_SWAP=0; RUN_ASSERT_TAILSCALE=0
-RUN_ASSERT_IGNITION=0; RUN_ASSERT_SYSEXT=0
+_has "domain:probe"      && TIER=1
+_has "domain:tui"        && TIER=1
+_has "domain:security"   && TIER=1 && DO_SECURITY=1
+_has "domain:install"    && TIER=3 && NEEDS_BOOT=1
+_has "domain:ignition"   && TIER=3 && NEEDS_BOOT=1
+_has "domain:headless"   && TIER=3 && NEEDS_BOOT=1
+_has "domain:sysext"     && TIER=3 && NEEDS_BOOT=1
+echo "$TITLE $LABELS" | grep -qi "swap"      && TIER=3 && NEEDS_BOOT=1
+echo "$TITLE $LABELS" | grep -qi "tailscale" && TIER=3 && NEEDS_BOOT=1
 
-echo "$LABELS" | grep -q "domain:install"   && RUN_ASSERT_INSTALL=1
-echo "$LABELS" | grep -q "domain:ignition"  && RUN_ASSERT_IGNITION=1
-echo "$LABELS" | grep -q "domain:sysext"    && RUN_ASSERT_SYSEXT=1
+log "tier=${TIER} needs_boot=${NEEDS_BOOT} security=${DO_SECURITY}"
 
-# Detect feature-specific labels from closed issues or PR title
-echo "$TITLE $LABELS" | grep -qi "swap"      && RUN_ASSERT_SWAP=1 && TIER=3 && NEEDS_BOOT=1
-echo "$TITLE $LABELS" | grep -qi "tailscale" && RUN_ASSERT_TAILSCALE=1 && TIER=3 && NEEDS_BOOT=1
-
-log "PR #${PR}: \"${TITLE}\""
-log "Labels: ${LABELS} | Tier: ${TIER} | Boot: ${NEEDS_BOOT}"
-
-# ── 4. Build from PR head ─────────────────────────────────────────────────────
-PREV_BRANCH=$(git branch --show-current 2>/dev/null || echo "main")
+# ── 4. Build ──────────────────────────────────────────────────────────────────
+PREV=$(git branch --show-current 2>/dev/null || echo "main")
 git fetch upstream "pull/${PR}/head:pr${PR}-qa" -q 2>/dev/null
-HEAD_SHA=$(git rev-parse "pr${PR}-qa" | head -c 12)
+SHA=$(git rev-parse "pr${PR}-qa" | head -c 12)
 git stash -q 2>/dev/null || true
 git checkout "pr${PR}-qa" -q
 
-log "Building ${HEAD_SHA}..."
-BUILD_OUT=$(just build 2>&1) && BUILD_RC=0 || BUILD_RC=$?
-git checkout "$PREV_BRANCH" -q 2>/dev/null || true
+log "Building ${SHA}..."
+just build > "${RUNDIR}/build.log" 2>&1 && BUILD_OK=1 || BUILD_OK=0
+git checkout "$PREV" -q 2>/dev/null || true
 git stash pop -q 2>/dev/null || true
 
-if [[ $BUILD_RC -ne 0 ]]; then
-  echo "## 🧪 Ghost Testlab Report — PR #${PR}" > "$REPORT"
-  echo "**⛔ BUILD FAILED**" >> "$REPORT"
-  echo '```' >> "$REPORT"; echo "$BUILD_OUT" >> "$REPORT"; echo '```' >> "$REPORT"
-  cat "$REPORT"; exit 1
-fi
-BINARY_SHA=$(sha256sum bin/knuckle | cut -c1-12)
-log "Binary sha256=${BINARY_SHA}"
+# ── 5. Report header ──────────────────────────────────────────────────────────
+FLATCAR_VER=$(_ghost "grep -m1 VERSION_ID= /etc/os-release 2>/dev/null | cut -d= -f2" 2>/dev/null || echo "unknown")
 
-# ── 5. Tier 0 — full CI gate ─────────────────────────────────────────────────
-log "Tier 0: just ci..."
-git checkout "pr${PR}-qa" -q
-UNIT_OUT=$(just ci 2>&1) && UNIT_RC=0 || UNIT_RC=$?
-git checkout "$PREV_BRANCH" -q 2>/dev/null || true
-UNIT_SUMMARY=$(echo "$UNIT_OUT" | grep -E "^ok |^FAIL|✅|PASS|error:" | tail -20)
-FLATCAR_VER=$(_ghost "cat /etc/os-release 2>/dev/null | grep -m1 VERSION_ID= | cut -d= -f2" 2>/dev/null || echo "unknown")
-
-# ── 6. Open report ───────────────────────────────────────────────────────────
-cat > "$REPORT" <<EOF
+cat > "$REPORT" << EOF
 ## 🧪 Ghost Testlab Report — PR #${PR}
 
-| Field | Value |
+| | |
 |---|---|
-| **Branch** | \`${BRANCH}\` @ \`${HEAD_SHA}\` |
-| **Author** | ${AUTHOR} |
 | **PR** | ${TITLE} |
+| **Author** | ${AUTHOR} |
+| **Branch** | \`${BRANCH}\` @ \`${SHA}\` |
 | **Closes** | ${CLOSES:-—} |
-| **Labels** | ${LABELS} |
 | **Flatcar** | ${FLATCAR_VER} |
+| **Labels** | ${LABELS} |
+| **Tier** | ${TIER} | boot verification: $([ $NEEDS_BOOT -eq 1 ] && echo "yes ✓" || echo "no") |
+| **Run** | ${RUN_ID} |
 | **Date** | ${START} |
-| **Tier** | ${TIER} (boot verification: $([ $NEEDS_BOOT -eq 1 ] && echo "yes" || echo "no")) |
 
 ---
 
-### Tier 0 — CI gate (dev machine)
-
-\`\`\`
-${UNIT_SUMMARY}
-\`\`\`
-
 EOF
 
-if [[ $UNIT_RC -ne 0 ]]; then
-  {
-    echo "**⛔ TIER 0 FAILED — CI gate not green. Ghost tests skipped.**"
-    echo ""
-    echo "<details><summary>Full CI output</summary>"
-    echo ""
-    echo '```'
-    echo "$UNIT_OUT" | tail -50
-    echo '```'
-    echo "</details>"
-    echo ""
-    echo "**Verdict: ❌ FAIL — fix CI gate first**"
-  } >> "$REPORT"
+if [[ $BUILD_OK -eq 0 ]]; then
+  { echo "### Build"; echo '```'; cat "${RUNDIR}/build.log" | tail -20; echo '```'; echo; echo "**Verdict: ❌ BUILD FAILED**"; } >> "$REPORT"
+  _file_issue_on_fail "$REPORT" "$RUNDIR" "Build failed" || true
   cat "$REPORT"; exit 1
 fi
-echo "**✅ TIER 0 PASS**" >> "$REPORT"
+
+# ── 6. Tier 0 — CI gate ───────────────────────────────────────────────────────
+log "Tier 0: just ci..."
+git checkout "pr${PR}-qa" -q
+just ci > "${RUNDIR}/ci.log" 2>&1 && CI_OK=1 || CI_OK=0
+git checkout "$PREV" -q 2>/dev/null || true
+
+CI_SUMMARY=$(grep -E "^ok |^FAIL|✅|PASS|cover:|error:" "${RUNDIR}/ci.log" | tail -20)
+
+{
+  echo "### Tier 0 — CI gate (dev machine)"
+  echo
+  echo '```'
+  echo "$CI_SUMMARY"
+  echo '```'
+  echo
+  [[ $CI_OK -eq 1 ]] && echo "**✅ TIER 0 PASS**" || echo "**❌ TIER 0 FAIL**"
+  echo
+} >> "$REPORT"
+
+if [[ $CI_OK -eq 0 ]]; then
+  echo "**Verdict: ❌ FAIL — CI gate not green**" >> "$REPORT"
+  _file_issue_on_fail "$REPORT" "$RUNDIR" "CI gate failed" || true
+  cat "$REPORT"; exit 1
+fi
 
 [[ $TIER -eq 0 ]] && {
-  echo "" >> "$REPORT"
-  echo "**Verdict: ✅ PASS** — unit tests only (no VM tests required for this label set)" >> "$REPORT"
+  echo "**Verdict: ✅ PASS** — unit tests sufficient for this label set" >> "$REPORT"
+  log "Done (tier 0)"
   cat "$REPORT"; exit 0
 }
 
-# ── 7. Ghost VM boot (installer environment) ──────────────────────────────────
+# ── 7. Allocate port + boot installer VM ─────────────────────────────────────
 log "Setting up installer VM on ghost..."
-_ghost "mkdir -p ${WORK}"
-_ghost_scp $GOPTS bin/knuckle "$GHOST:${WORK}/knuckle"
+_ghost "mkdir -p ${WORK_REMOTE}"
+_scp_to $GOPTS bin/knuckle "$GHOST:${WORK_REMOTE}/knuckle"
 
-PORT=$(_ghost "
-  for p in \$(seq 2300 2315); do
-    ss -tln 2>/dev/null | grep -q \":\${p} \" || { echo \$p; exit 0; }
-  done
-  echo NOFREEPORT
-")
-[[ "$PORT" == "NOFREEPORT" ]] && {
-  echo "**⛔ No free port on ghost. Kill stale VMs: \`ssh jorge@ghost 'pkill -f qemu-system'\`**" >> "$REPORT"
-  cat "$REPORT"; exit 1
-}
-log "Allocated port ${PORT}"
+HOST_KEY=$(_ghost "cat ~/.ssh/id_ed25519.pub")
+PORT=$(_ghost "for p in \$(seq 2300 2315); do ss -tln | grep -q \":\${p} \" || { echo \$p; exit 0; }; done; echo NONE")
+[[ "$PORT" == "NONE" ]] && { echo "**⛔ No free port on ghost.**" >> "$REPORT"; cat "$REPORT"; exit 1; }
+log "Port ${PORT}"
 
-INSTALLER_UP=$(_ghost "
-  set -euo pipefail
-  SO='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR'
-  W=${WORK}; P=${PORT}
-  rm -f \$W/boot.qcow2 \$W/target.qcow2 \$W/serial-installer.log
-  qemu-img create -f qcow2 -b ${FLATCAR_BASE} -F qcow2 \$W/boot.qcow2 >/dev/null
-  qemu-img create -f qcow2 \$W/target.qcow2 20G >/dev/null
-  SSH_KEY=\$(cat ~/.ssh/id_ed25519.pub)
-  printf '{\"ignition\":{\"version\":\"3.4.0\"},\"passwd\":{\"users\":[{\"name\":\"core\",\"sshAuthorizedKeys\":[\"%s\"]}]},\"systemd\":{\"units\":[{\"name\":\"sshd.service\",\"enabled\":true}]}}\n' \"\$SSH_KEY\" > \$W/installer.ign
+_ghost "
+  rm -f ${WORK_REMOTE}/boot.qcow2 ${WORK_REMOTE}/target.qcow2 \
+        ${WORK_REMOTE}/serial-installer.log ${WORK_REMOTE}/knuckle-install.log
+  qemu-img create -f qcow2 -b ${BASE_IMG} -F qcow2 ${WORK_REMOTE}/boot.qcow2 >/dev/null
+  qemu-img create -f qcow2 ${WORK_REMOTE}/target.qcow2 20G >/dev/null
+  printf '{\"ignition\":{\"version\":\"3.4.0\"},\"passwd\":{\"users\":[{\"name\":\"core\",\"sshAuthorizedKeys\":[\"%s\"]}]},\"systemd\":{\"units\":[{\"name\":\"sshd.service\",\"enabled\":true}]}}\n' '${HOST_KEY}' > ${WORK_REMOTE}/installer.ign
   qemu-system-x86_64 \
     -m 2048 -smp 2 -enable-kvm -cpu host \
-    -drive if=virtio,file=\$W/boot.qcow2,format=qcow2 \
-    -drive if=virtio,file=\$W/target.qcow2,format=qcow2 \
-    -fw_cfg name=opt/org.flatcar-linux/config,file=\$W/installer.ign \
-    -net nic,model=virtio -net user,hostfwd=tcp::\${P}-:22 \
-    -display none -daemonize -pidfile \$W/qemu-installer.pid \
-    -serial file:\$W/serial-installer.log >/dev/null 2>&1
+    -drive if=virtio,file=${WORK_REMOTE}/boot.qcow2,format=qcow2 \
+    -drive if=virtio,file=${WORK_REMOTE}/target.qcow2,format=qcow2 \
+    -fw_cfg name=opt/org.flatcar-linux/config,file=${WORK_REMOTE}/installer.ign \
+    -net nic,model=virtio -net user,hostfwd=tcp::${PORT}-:22 \
+    -display none -daemonize -pidfile ${WORK_REMOTE}/qemu-installer.pid \
+    -serial file:${WORK_REMOTE}/serial-installer.log >/dev/null 2>&1
+"
+
+log "Waiting for installer VM SSH..."
+_ghost "
   ok=0
   for i in \$(seq 1 20); do
-    ssh \$SO -o ConnectTimeout=2 -p \$P core@127.0.0.1 true 2>/dev/null && ok=1 && break
+    ssh $GOPTS -o ConnectTimeout=2 -p ${PORT} core@127.0.0.1 true 2>/dev/null && ok=1 && break
     sleep 2
   done
-  [ \$ok -eq 1 ] && echo VM_READY || { echo VM_BOOT_TIMEOUT; tail -10 \$W/serial-installer.log; exit 1; }
-" 2>&1) || true
-
-if ! echo "$INSTALLER_UP" | grep -q "VM_READY"; then
-  { echo ""; echo "### Ghost VM Boot"; echo '```'; echo "$INSTALLER_UP"; echo '```'; echo "**⛔ VM BOOT FAILED**"; echo ""; echo "**Verdict: ❌ FAIL**"; } >> "$REPORT"
+  [ \$ok -eq 1 ] || { echo BOOT_TIMEOUT; tail -10 ${WORK_REMOTE}/serial-installer.log >&2; exit 1; }
+" || {
+  _ghost_logs_to_rundir
+  { echo "### Installer VM Boot"; echo "**⛔ BOOT TIMEOUT**"; echo; echo "**Verdict: ❌ FAIL**"; } >> "$REPORT"
   cat "$REPORT"; exit 1
-fi
-log "Installer VM ready on ghost:${PORT}"
+}
 
-# SCP binary + chmod
 _ghost "
-  scp $GOPTS -P ${PORT} ${WORK}/knuckle core@127.0.0.1:/tmp/knuckle
+  scp $GOPTS -P ${PORT} ${WORK_REMOTE}/knuckle core@127.0.0.1:/tmp/knuckle
   ssh $GOPTS -p ${PORT} core@127.0.0.1 'chmod +x /tmp/knuckle'
 "
+log "Installer VM ready"
 
 # ── 8. Tier 1 — tool check + dry-run ─────────────────────────────────────────
 log "Tier 1: tool check + dry-run..."
-HOST_KEY=$(_ghost "cat ~/.ssh/id_ed25519.pub")
 
-TIER1_OUT=$(_ghost "
-  set -euo pipefail
-  SO='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR'
-  VM=\"ssh \$SO -p ${PORT} core@127.0.0.1\"
-  echo '--- OS ---'
-  \$VM 'cat /etc/os-release | grep -E \"VERSION_ID|PRETTY_NAME\"'
-  echo '--- util-linux ---'
-  \$VM 'sfdisk --version && wipefs --version'
-  echo '--- sfdisk --relocate ---'
-  \$VM 'sfdisk --help 2>&1 | grep -o -- \"--relocate\" && echo \"present\" || echo \"MISSING --relocate\"'
-  echo '--- headless --dry-run ---'
-  printf '{\"channel\":\"stable\",\"hostname\":\"qa-pr-${PR}\",\"timezone\":\"UTC\",\"network\":{\"mode\":\"dhcp\"},\"users\":[{\"username\":\"core\",\"ssh_keys\":[\"${HOST_KEY}\"]}],\"disk\":\"/dev/vdb\",\"update_strategy\":\"off\",\"reboot\":false}' | \$VM 'cat > /tmp/qa.json'
-  \$VM 'sudo /tmp/knuckle --headless --dry-run --config /tmp/qa.json --log-file /tmp/knuckle-dryrun.log 2>&1'
-  echo '--- dry-run progress steps ---'
-  \$VM 'sudo cat /tmp/knuckle-dryrun.log 2>/dev/null | grep -oP \"\\\"msg\\\":\\\"[^\\\"]+\\\"\" | head -10' || true
-" 2>&1) || { echo "TIER1_FAIL"; }
+# Build the headless config — include feature-specific fields based on labels
+SWAP_FIELD=""; TS_FIELD=""
+echo "$TITLE $LABELS" | grep -qi "swap"      && SWAP_FIELD=',\"swap\":{\"enabled\":true,\"size_mb\":512}'
+echo "$TITLE $LABELS" | grep -qi "tailscale" && TS_FIELD=',\"tailscale\":{\"auth_key\":\"tskey-auth-abcdef1234567890AB-CDEFGHIJKLMNOPQRSTUVWXYZ0123456789\"}' 
 
-DRY_PASS=$(echo "$TIER1_OUT" | grep -c "Installation complete" || true)
+QA_CONFIG="{\"channel\":\"stable\",\"hostname\":\"qa-pr-${PR}\",\"timezone\":\"UTC\",\"network\":{\"mode\":\"dhcp\"},\"users\":[{\"username\":\"core\",\"ssh_keys\":[\"${HOST_KEY}\"]}],\"disk\":\"/dev/vdb\",\"update_strategy\":\"off\",\"reboot\":false${SWAP_FIELD}${TS_FIELD}}"
 
+_ghost "printf '%s\n' '${QA_CONFIG}' | ssh $GOPTS -p ${PORT} core@127.0.0.1 'cat > /tmp/qa.json'"
+
+T1=$(_ghost "
+  ssh $GOPTS -p ${PORT} core@127.0.0.1 '
+    echo --- os ---
+    grep -E \"VERSION_ID|PRETTY_NAME\" /etc/os-release
+    echo --- util-linux ---
+    sfdisk --version
+    wipefs --version
+    echo --- sfdisk --relocate ---
+    sfdisk --help 2>&1 | grep -o -- --relocate || echo MISSING
+    echo --- headless --dry-run ---
+    sudo /tmp/knuckle --headless --dry-run --config /tmp/qa.json --log-file /tmp/knuckle-dryrun.log 2>&1
+    echo --- progress steps ---
+    sudo cat /tmp/knuckle-dryrun.log 2>/dev/null | grep -o \"\\\"msg\\\":\\\"[^\\\"]*\\\"\" | head -12
+  '
+" 2>&1) || T1="DRY_RUN_ERROR"
+
+DRY_OK=$(echo "$T1" | grep -c "Installation complete" || true)
 {
-  echo ""
   echo "### Tier 1 — Installer VM: tool check + dry-run (port ${PORT})"
-  echo ""
+  echo
   echo '```'
-  echo "$TIER1_OUT"
+  echo "$T1"
   echo '```'
-  echo ""
-  [[ $DRY_PASS -gt 0 ]] && echo "**✅ TIER 1 PASS**" || echo "**❌ TIER 1 FAIL — dry-run did not complete**"
+  echo
+  [[ $DRY_OK -gt 0 ]] && echo "**✅ TIER 1 PASS**" || echo "**❌ TIER 1 FAIL**"
+  echo
 } >> "$REPORT"
 
-if [[ $DRY_PASS -eq 0 ]]; then
-  _ghost "kill \$(cat ${WORK}/qemu-installer.pid 2>/dev/null) 2>/dev/null || true" 2>/dev/null || true
-  echo "" >> "$REPORT"; echo "**Verdict: ❌ FAIL**" >> "$REPORT"
+if [[ $DRY_OK -eq 0 ]]; then
+  _ghost "kill \$(cat ${WORK_REMOTE}/qemu-installer.pid 2>/dev/null) 2>/dev/null || true"
+  echo "**Verdict: ❌ FAIL — dry-run did not complete**" >> "$REPORT"
+  _fetch_artifacts
+  _file_issue_on_fail "$REPORT" "$RUNDIR" "Dry-run failed" || true
   cat "$REPORT"; exit 1
 fi
 
-# Security assertion tests (run in installer VM regardless of tier)
-if [[ $SECURITY_TESTS -eq 1 ]]; then
-  log "Security assertions: bad-input rejection tests..."
-  SEC_OUT=$(_ghost "
-    set -euo pipefail
-    SO='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR'
-    VM=\"ssh \$SO -p ${PORT} core@127.0.0.1\"
-    echo '--- plaintext password must be REJECTED ---'
-    printf '{\"channel\":\"stable\",\"hostname\":\"qa-sec\",\"timezone\":\"UTC\",\"network\":{\"mode\":\"dhcp\"},\"users\":[{\"username\":\"core\",\"password\":\"hunter2\"}],\"disk\":\"/dev/vdb\",\"update_strategy\":\"off\",\"reboot\":false}' | \$VM 'cat > /tmp/qa-bad-pw.json'
-    \$VM 'sudo /tmp/knuckle --headless --dry-run --config /tmp/qa-bad-pw.json 2>&1' && echo 'BAD_PW_ACCEPTED_FAIL' || echo 'BAD_PW_REJECTED_PASS'
-    echo '--- malformed SSH key must be REJECTED ---'
-    printf '{\"channel\":\"stable\",\"hostname\":\"qa-sec\",\"timezone\":\"UTC\",\"network\":{\"mode\":\"dhcp\"},\"users\":[{\"username\":\"core\",\"ssh_keys\":[\"not-a-valid-key\"]}],\"disk\":\"/dev/vdb\",\"update_strategy\":\"off\",\"reboot\":false}' | \$VM 'cat > /tmp/qa-bad-key.json'
-    \$VM 'sudo /tmp/knuckle --headless --dry-run --config /tmp/qa-bad-key.json 2>&1' && echo 'BAD_KEY_ACCEPTED_FAIL' || echo 'BAD_KEY_REJECTED_PASS'
-    echo '--- valid crypt hash must be ACCEPTED ---'
-    printf '{\"channel\":\"stable\",\"hostname\":\"qa-sec\",\"timezone\":\"UTC\",\"network\":{\"mode\":\"dhcp\"},\"users\":[{\"username\":\"core\",\"password\":\"\\$6\\$rounds=4096\\$testsalt\\$hashhash123\"}],\"disk\":\"/dev/vdb\",\"update_strategy\":\"off\",\"reboot\":false}' | \$VM 'cat > /tmp/qa-good-pw.json'
-    \$VM 'sudo /tmp/knuckle --headless --dry-run --config /tmp/qa-good-pw.json 2>&1' && echo 'GOOD_PW_ACCEPTED_PASS' || echo 'GOOD_PW_REJECTED_FAIL'
-  " 2>&1) || true
+# ── 9. Security bad-input tests (Tier 1+) ────────────────────────────────────
+if [[ $DO_SECURITY -eq 1 ]]; then
+  log "Security: bad-input rejection tests..."
 
-  SEC_FAIL=$(echo "$SEC_OUT" | grep -c "_FAIL" || true)
-  SEC_PASS=$(echo "$SEC_OUT" | grep -c "_PASS" || true)
+  cat > /tmp/qa-sec-tests-${PR}.sh << 'SECSCRIPT'
+#!/bin/bash
+set -euo pipefail
+KNUCKLE="sudo /tmp/knuckle"
+FAIL=0
+
+run_expect_fail() {
+  local desc="$1"; local cfg="$2"
+  printf '%s\n' "$cfg" > /tmp/qa-sec-test.json
+  if $KNUCKLE --headless --dry-run --config /tmp/qa-sec-test.json --log-file /tmp/qa-sec.log 2>&1; then
+    echo "FAIL (accepted): $desc"
+    FAIL=1
+  else
+    echo "PASS (rejected): $desc"
+  fi
+}
+
+run_expect_pass() {
+  local desc="$1"; local cfg="$2"
+  printf '%s\n' "$cfg" > /tmp/qa-sec-test.json
+  if $KNUCKLE --headless --dry-run --config /tmp/qa-sec-test.json --log-file /tmp/qa-sec.log 2>&1; then
+    echo "PASS (accepted): $desc"
+  else
+    echo "FAIL (rejected): $desc"
+    FAIL=1
+  fi
+}
+
+BASE='{"channel":"stable","hostname":"qa-sec","timezone":"UTC","network":{"mode":"dhcp"},"disk":"/dev/vdb","update_strategy":"off","reboot":false}'
+
+run_expect_fail "plaintext password" \
+  "$(echo "$BASE" | python3 -c "import sys,json; d=json.load(sys.stdin); d['users']=[{'username':'core','password':'hunter2'}]; print(json.dumps(d))")"
+
+run_expect_fail "malformed SSH key" \
+  "$(echo "$BASE" | python3 -c "import sys,json; d=json.load(sys.stdin); d['users']=[{'username':'core','ssh_keys':['not-a-key']}]; print(json.dumps(d))")"
+
+run_expect_fail "empty username" \
+  "$(echo "$BASE" | python3 -c "import sys,json; d=json.load(sys.stdin); d['users']=[{'username':'','ssh_keys':['ssh-ed25519 AAAA test@qa']}]; print(json.dumps(d))")"
+
+run_expect_pass "valid crypt hash" \
+  "$(echo "$BASE" | python3 -c "import sys,json; d=json.load(sys.stdin); d['users']=[{'username':'core','password':r'\$6\$rounds=4096\$testsalt\$hashhash123'}]; print(json.dumps(d))")"
+
+run_expect_pass "valid SSH key" \
+  "$(echo "$BASE" | python3 -c "import sys,json; d=json.load(sys.stdin); d['users']=[{'username':'core','ssh_keys':['ssh-ed25519 AAAA test@qa']}]; print(json.dumps(d))")"
+
+echo "SECURITY_TESTS_DONE fail_count=${FAIL}"
+exit $FAIL
+SECSCRIPT
+
+  _scp_to $GOPTS /tmp/qa-sec-tests-${PR}.sh "$GHOST:${WORK_REMOTE}/sec-tests.sh"
+  _ghost "scp $GOPTS -P ${PORT} ${WORK_REMOTE}/sec-tests.sh core@127.0.0.1:/tmp/sec-tests.sh"
+
+  SEC=$(_ghost "ssh $GOPTS -p ${PORT} core@127.0.0.1 'bash /tmp/sec-tests.sh 2>&1'" 2>&1) || SEC_OK=0
+  SEC_OK=$(echo "$SEC" | grep -c "SECURITY_TESTS_DONE fail_count=0" || true)
 
   {
-    echo ""
-    echo "### Security Assertions — Bad Input Rejection"
-    echo ""
+    echo "### Security — Bad Input Rejection"
+    echo
     echo '```'
-    echo "$SEC_OUT"
+    echo "$SEC"
     echo '```'
-    echo ""
-    [[ $SEC_FAIL -eq 0 ]] && echo "**✅ SECURITY ASSERTIONS PASS** (${SEC_PASS} checks)" || echo "**❌ SECURITY ASSERTIONS FAIL** (${SEC_FAIL} failures)"
+    echo
+    [[ $SEC_OK -gt 0 ]] && echo "**✅ SECURITY TESTS PASS**" || echo "**❌ SECURITY TESTS FAIL**"
+    echo
   } >> "$REPORT"
 
-  if [[ $SEC_FAIL -gt 0 ]]; then
-    _ghost "kill \$(cat ${WORK}/qemu-installer.pid 2>/dev/null) 2>/dev/null || true" 2>/dev/null || true
-    echo "" >> "$REPORT"; echo "**Verdict: ❌ FAIL — security assertions failed**" >> "$REPORT"
+  if [[ $SEC_OK -eq 0 ]]; then
+    _ghost "kill \$(cat ${WORK_REMOTE}/qemu-installer.pid 2>/dev/null) 2>/dev/null || true"
+    echo "**Verdict: ❌ FAIL — security regression**" >> "$REPORT"
+    _fetch_artifacts
+    _file_issue_on_fail "$REPORT" "$RUNDIR" "Security regression: bad input accepted" || true
     cat "$REPORT"; exit 1
   fi
 fi
 
 [[ $TIER -lt 3 ]] && {
-  _ghost "kill \$(cat ${WORK}/qemu-installer.pid 2>/dev/null) 2>/dev/null || true" 2>/dev/null || true
-  echo "" >> "$REPORT"; echo "**Verdict: ✅ PASS**" >> "$REPORT"
+  echo "**Verdict: ✅ PASS**" >> "$REPORT"
+  _fetch_artifacts
+  log "Done (tier 1)"
   cat "$REPORT"; exit 0
 }
 
-# ── 9. Tier 3 — real headless install ────────────────────────────────────────
+# ── 10. Tier 3 — real headless install ───────────────────────────────────────
 log "Tier 3: real headless install..."
 
-# Build feature-specific headless config based on what the PR adds
-SWAP_CFG=""; TAILSCALE_CFG=""
-[[ $RUN_ASSERT_SWAP -eq 1 ]]      && SWAP_CFG=',\"swap\":{\"enabled\":true,\"size_mb\":512}'
-[[ $RUN_ASSERT_TAILSCALE -eq 1 ]] && TAILSCALE_CFG=',\"tailscale\":{\"auth_key\":\"tskey-auth-abcdef1234567890AB-CDEFGHIJKLMNOPQRSTUVWXYZ0123456789\"}'
-
 INSTALL_OUT=$(_ghost "
-  set -euo pipefail
-  SO='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR'
-  VM=\"ssh \$SO -p ${PORT} core@127.0.0.1\"
-  echo '--- writing install config ---'
-  printf '{\"channel\":\"stable\",\"hostname\":\"qa-pr-${PR}\",\"timezone\":\"UTC\",\"network\":{\"mode\":\"dhcp\"},\"users\":[{\"username\":\"core\",\"ssh_keys\":[\"${HOST_KEY}\"]}],\"disk\":\"/dev/vdb\",\"update_strategy\":\"off\",\"reboot\":false${SWAP_CFG}${TAILSCALE_CFG}}' | \$VM 'cat > /tmp/qa-install.json'
-  echo '--- running knuckle --headless (real install) ---'
-  \$VM 'sudo /tmp/knuckle --headless --config /tmp/qa-install.json --log-file /tmp/knuckle-install.log 2>&1' && echo INSTALL_COMPLETE || echo INSTALL_FAILED
-  echo '--- install log (last 20 lines) ---'
-  \$VM 'sudo cat /tmp/knuckle-install.log 2>/dev/null | tail -20' || true
-  echo '--- disk state post-install ---'
-  \$VM 'lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL /dev/vdb 2>&1' || true
+  ssh $GOPTS -p ${PORT} core@127.0.0.1 '
+    sudo /tmp/knuckle --headless --config /tmp/qa.json \
+      --log-file /tmp/knuckle-install.log 2>&1
+    echo INSTALL_EXIT_CODE=\$?
+  '
 " 2>&1) || true
-
-INSTALL_COMPLETE=$(echo "$INSTALL_OUT" | grep -c "INSTALL_COMPLETE" || true)
+INSTALL_DONE=$(echo "$INSTALL_OUT" | grep -c "INSTALL_EXIT_CODE=0" || true)
 
 {
-  echo ""
   echo "### Tier 3 — Headless install"
-  echo ""
+  echo
   echo '```'
   echo "$INSTALL_OUT"
   echo '```'
-  echo ""
-  [[ $INSTALL_COMPLETE -gt 0 ]] && echo "**✅ INSTALL COMPLETE**" || echo "**❌ INSTALL FAILED**"
+  echo
 } >> "$REPORT"
 
-if [[ $INSTALL_COMPLETE -eq 0 ]]; then
-  _ghost "kill \$(cat ${WORK}/qemu-installer.pid 2>/dev/null) 2>/dev/null || true" 2>/dev/null || true
-  echo "" >> "$REPORT"; echo "**Verdict: ❌ FAIL — install did not complete**" >> "$REPORT"
+# Retrieve install log from VM before killing it
+_ghost "ssh $GOPTS -p ${PORT} core@127.0.0.1 'sudo cat /tmp/knuckle-install.log 2>/dev/null'" \
+  > "${RUNDIR}/knuckle-install.log" 2>/dev/null || true
+{
+  echo "<details><summary>knuckle-install.log</summary>"
+  echo
+  echo '```'
+  cat "${RUNDIR}/knuckle-install.log" | tail -40
+  echo '```'
+  echo
+  echo "</details>"
+  echo
+  [[ $INSTALL_DONE -gt 0 ]] && echo "**✅ INSTALL COMPLETE**" || echo "**❌ INSTALL FAILED**"
+  echo
+} >> "$REPORT"
+
+_ghost "kill \$(cat ${WORK_REMOTE}/qemu-installer.pid 2>/dev/null) 2>/dev/null || true; sleep 2"
+
+if [[ $INSTALL_DONE -eq 0 ]]; then
+  _fetch_artifacts
+  echo "**Verdict: ❌ FAIL — install did not complete**" >> "$REPORT"
+  _file_issue_on_fail "$REPORT" "$RUNDIR" "Headless install failed" || true
   cat "$REPORT"; exit 1
 fi
 
-# ── 10. Boot the installed system ─────────────────────────────────────────────
-log "Booting installed system on ghost:${PORT}..."
+# ── 11. Boot installed Flatcar ────────────────────────────────────────────────
+log "Booting installed system..."
 
-# Kill installer VM
-_ghost "kill \$(cat ${WORK}/qemu-installer.pid 2>/dev/null) 2>/dev/null || true; sleep 2" 2>/dev/null || true
-
-BOOT_UP=$(_ghost "
-  set -euo pipefail
-  SO='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR'
-  W=${WORK}; P=${PORT}
-  rm -f \$W/serial-installed.log \$W/qemu-installed.pid
+_ghost "
+  rm -f ${WORK_REMOTE}/serial-installed.log ${WORK_REMOTE}/qemu-installed.pid
   qemu-system-x86_64 \
     -m 2048 -smp 2 -enable-kvm -cpu host \
-    -drive if=virtio,file=\$W/target.qcow2,format=qcow2 \
-    -net nic,model=virtio -net user,hostfwd=tcp::\${P}-:22 \
-    -display none -daemonize -pidfile \$W/qemu-installed.pid \
-    -serial file:\$W/serial-installed.log >/dev/null 2>&1
-  echo 'Waiting for installed Flatcar to boot + run Ignition...'
+    -drive if=virtio,file=${WORK_REMOTE}/target.qcow2,format=qcow2 \
+    -net nic,model=virtio -net user,hostfwd=tcp::${PORT}-:22 \
+    -display none -daemonize -pidfile ${WORK_REMOTE}/qemu-installed.pid \
+    -serial file:${WORK_REMOTE}/serial-installed.log >/dev/null 2>&1
+"
+
+_ghost "
   ok=0
   for i in \$(seq 1 30); do
-    ssh \$SO -o ConnectTimeout=3 -p \$P core@127.0.0.1 true 2>/dev/null && ok=1 && break
+    ssh $GOPTS -o ConnectTimeout=3 -p ${PORT} core@127.0.0.1 true 2>/dev/null && ok=1 && break
     sleep 5
   done
-  [ \$ok -eq 1 ] && echo INSTALLED_READY || { echo INSTALLED_BOOT_TIMEOUT; tail -15 \$W/serial-installed.log; exit 1; }
-" 2>&1) || true
-
-if ! echo "$BOOT_UP" | grep -q "INSTALLED_READY"; then
-  { echo ""; echo "### Installed System Boot"; echo '```'; echo "$BOOT_UP"; echo '```'; echo "**⛔ INSTALLED SYSTEM DID NOT BOOT**"; echo ""; echo "**Verdict: ❌ FAIL**"; } >> "$REPORT"
+  [ \$ok -eq 1 ] || { echo INSTALLED_BOOT_TIMEOUT; tail -10 ${WORK_REMOTE}/serial-installed.log >&2; exit 1; }
+" || {
+  _fetch_artifacts
+  { echo "### Installed System Boot"; echo "**⛔ INSTALLED SYSTEM DID NOT BOOT**"; echo; echo "**Verdict: ❌ FAIL**"; } >> "$REPORT"
+  _file_issue_on_fail "$REPORT" "$RUNDIR" "Installed Flatcar did not boot" || true
   cat "$REPORT"; exit 1
+}
+log "Installed system online"
+
+# ── 12. Domain assertions (run inside the booted installed system) ─────────────
+log "Running domain assertions..."
+
+# Build the assertion script locally — clean, no escaping hell
+ASSERT_SCRIPT="/tmp/knuckle-qa-assert-${PR}.sh"
+
+cat > "$ASSERT_SCRIPT" << ASSERT_SCRIPT_EOF
+#!/bin/bash
+# Domain assertions for PR #${PR}: ${TITLE}
+# Run inside the booted installed Flatcar (not the installer).
+set -euo pipefail
+FAIL=0
+
+check() {
+  local desc="\$1"; shift
+  echo "=== \${desc} ==="
+  if "\$@" 2>&1; then
+    true
+  else
+    echo "FAIL: \${desc}"
+    FAIL=1
+  fi
+  echo ""
+}
+
+must_exist() {
+  local path="\$1"
+  if [ -e "\$path" ]; then
+    ls -lah "\$path" 2>&1
+  else
+    echo "FAIL: \${path} NOT FOUND"
+    FAIL=1
+  fi
+}
+
+# ── Baseline: always ──────────────────────────────────────────────────────────
+echo "=== BASELINE: OS identity (installed system, not installer) ==="
+grep -E "VERSION_ID|PRETTY_NAME" /etc/os-release
+echo ""
+
+echo "=== BASELINE: hostname matches config ==="
+hostname
+[ "\$(hostname)" = "qa-pr-${PR}" ] || { echo "FAIL: expected qa-pr-${PR}, got \$(hostname)"; FAIL=1; }
+echo ""
+
+echo "=== BASELINE: core user SSH key (Ignition applied) ==="
+must_exist /home/core/.ssh/authorized_keys
+wc -l /home/core/.ssh/authorized_keys
+echo ""
+
+ASSERT_SCRIPT_EOF
+
+# Append domain-specific assertions based on labels
+_has "domain:install" && cat >> "$ASSERT_SCRIPT" << 'INSTALL_ASSERTS'
+
+# ── domain:install ────────────────────────────────────────────────────────────
+echo "=== ASSERT [install]: GPT partition table intact ==="
+sudo sfdisk -l /dev/vda 2>&1 | head -15
+# GPT must be present — sfdisk exits 0 only when label is valid
+sudo sfdisk -l /dev/vda 2>&1 | grep -q "^Disk label type: gpt\|^Disklabel type: gpt" || {
+  echo "FAIL: GPT label not found — partition table may be corrupt"
+  FAIL=1
+}
+echo ""
+
+echo "=== ASSERT [install]: /dev/disk/by-id populated ==="
+ls -la /dev/disk/by-id/ 2>&1 | grep -v "^total" | head -5
+ls /dev/disk/by-id/ | grep -v "^$" | wc -l | xargs echo "by-id entries:"
+echo ""
+
+INSTALL_ASSERTS
+
+echo "$TITLE $LABELS" | grep -qi "swap" && cat >> "$ASSERT_SCRIPT" << 'SWAP_ASSERTS'
+
+# ── swap feature ──────────────────────────────────────────────────────────────
+echo "=== ASSERT [swap]: /var/swapfile exists at mode 0600 ==="
+must_exist /var/swapfile
+stat -c "%a %n" /var/swapfile | grep -q "^600 " || { echo "FAIL: swapfile not mode 0600"; FAIL=1; }
+echo ""
+
+echo "=== ASSERT [swap]: swapon shows active swap ==="
+swapon --show 2>&1
+swapon --show 2>/dev/null | grep -q "swapfile" || { echo "FAIL: swapfile not in swapon --show"; FAIL=1; }
+echo ""
+
+echo "=== ASSERT [swap]: knuckle-create-swapfile.service completed ==="
+systemctl status knuckle-create-swapfile.service 2>&1 | grep -E "Active:|Loaded:"
+systemctl is-active knuckle-create-swapfile.service | grep -q "active" || {
+  echo "FAIL: knuckle-create-swapfile.service did not complete successfully"
+  FAIL=1
+}
+echo ""
+
+echo "=== ASSERT [swap]: free shows non-zero Swap ==="
+free -h 2>&1
+free 2>/dev/null | grep -q "^Swap:.*[1-9]" || { echo "FAIL: no swap in free output"; FAIL=1; }
+echo ""
+
+SWAP_ASSERTS
+
+echo "$TITLE $LABELS" | grep -qi "tailscale" && cat >> "$ASSERT_SCRIPT" << 'TS_ASSERTS'
+
+# ── tailscale feature ─────────────────────────────────────────────────────────
+echo "=== ASSERT [tailscale]: /etc/tailscale/tailscale.env exists at mode 0600 ==="
+must_exist /etc/tailscale/tailscale.env
+MODE=$(stat -c "%a" /etc/tailscale/tailscale.env 2>/dev/null || echo "MISSING")
+[ "$MODE" = "600" ] || { echo "FAIL: mode is ${MODE}, expected 600"; FAIL=1; }
+echo "mode: ${MODE}"
+echo ""
+
+echo "=== ASSERT [tailscale]: tailscaled.service is enabled ==="
+systemctl is-enabled tailscaled.service 2>&1
+systemctl is-enabled tailscaled.service 2>/dev/null | grep -q "enabled" || {
+  echo "FAIL: tailscaled.service not enabled"
+  FAIL=1
+}
+echo ""
+
+echo "=== ASSERT [tailscale]: knuckle-tailscale-up.service is enabled ==="
+systemctl is-enabled knuckle-tailscale-up.service 2>&1
+systemctl is-enabled knuckle-tailscale-up.service 2>/dev/null | grep -q "enabled" || {
+  echo "FAIL: knuckle-tailscale-up.service not enabled"
+  FAIL=1
+}
+echo ""
+
+TS_ASSERTS
+
+_has "domain:ignition" && cat >> "$ASSERT_SCRIPT" << 'IGN_ASSERTS'
+
+# ── domain:ignition ───────────────────────────────────────────────────────────
+echo "=== ASSERT [ignition]: update strategy applied ==="
+grep -i "strategy" /etc/flatcar/update.conf 2>/dev/null || echo "(update.conf not present — expected for update_strategy:off)"
+echo ""
+
+echo "=== ASSERT [ignition]: timezone link correct ==="
+ls -la /etc/localtime 2>&1
+echo ""
+
+IGN_ASSERTS
+
+_has "domain:sysext" && cat >> "$ASSERT_SCRIPT" << 'SYSEXT_ASSERTS'
+
+# ── domain:sysext ──────────────────────────────────────────────────────────────
+echo "=== ASSERT [sysext]: /etc/extensions populated ==="
+ls /etc/extensions/ 2>&1
+ls /etc/extensions/ 2>/dev/null | grep -q "\.raw$" || {
+  echo "FAIL: no .raw files in /etc/extensions/"
+  FAIL=1
+}
+echo ""
+
+echo "=== ASSERT [sysext]: systemd-sysext status ==="
+sudo systemd-sysext status 2>&1 | head -10
+echo ""
+
+SYSEXT_ASSERTS
+
+# Always: final verdict
+cat >> "$ASSERT_SCRIPT" << 'FINAL'
+
+echo "=== ASSERTION SUMMARY ==="
+if [ $FAIL -eq 0 ]; then
+  echo "ALL_ASSERTIONS_PASS"
+else
+  echo "ASSERTIONS_FAILED fail_count=${FAIL}"
 fi
-log "Installed system booted"
+exit $FAIL
+FINAL
 
-# ── 11. Domain assertions ──────────────────────────────────────────────────────
-log "Running domain assertions inside installed Flatcar..."
+# SCP assertion script to ghost, then into the VM
+_scp_to $GOPTS "$ASSERT_SCRIPT" "$GHOST:${WORK_REMOTE}/assert.sh"
+_ghost "scp $GOPTS -P ${PORT} ${WORK_REMOTE}/assert.sh core@127.0.0.1:/tmp/assert.sh"
 
-ASSERT_OUT=$(_ghost "
-  set -euo pipefail
-  SO='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR'
-  INST=\"ssh \$SO -p ${PORT} core@127.0.0.1\"
-
-  echo '=== BASELINE: OS identity (proves this is the installed system, not installer) ==='
-  \$INST 'cat /etc/os-release | grep -E \"PRETTY_NAME|VERSION_ID\"'
-  echo ''
-  echo '=== BASELINE: hostname matches config ==='
-  \$INST 'hostname'
-  echo ''
-  echo '=== BASELINE: core user SSH key provisioned by Ignition ==='
-  \$INST 'ls -la ~/.ssh/authorized_keys && wc -l ~/.ssh/authorized_keys'
-  echo ''
-
-  $([ $RUN_ASSERT_INSTALL -eq 1 ] && cat << 'ASSERT_INSTALL'
-  echo '=== ASSERT [domain:install]: GPT partition table intact post-wipe+install ==='
-  $INST 'sudo sfdisk -l /dev/vda 2>&1 | head -15'
-  echo ''
-  echo '=== ASSERT [domain:install]: /dev/disk/by-id populated ==='
-  $INST 'ls -la /dev/disk/by-id/ 2>&1 | grep -v "^total" | head -5'
-  echo ''
-ASSERT_INSTALL
-)
-
-  $([ $RUN_ASSERT_SWAP -eq 1 ] && cat << 'ASSERT_SWAP'
-  echo '=== ASSERT [swap]: /var/swapfile exists at correct mode ==='
-  $INST 'ls -lah /var/swapfile 2>&1 || echo "FAIL: /var/swapfile NOT FOUND"'
-  echo ''
-  echo '=== ASSERT [swap]: swapon shows active swap ==='
-  $INST 'swapon --show 2>&1 || echo "FAIL: no active swap"'
-  echo ''
-  echo '=== ASSERT [swap]: knuckle-create-swapfile.service completed ==='
-  $INST 'systemctl status knuckle-create-swapfile.service 2>&1 | grep -E "Active:|Loaded:" | head -2'
-  echo ''
-  echo '=== ASSERT [swap]: free -h shows non-zero swap ==='
-  $INST 'free -h 2>&1'
-  echo ''
-ASSERT_SWAP
-)
-
-  $([ $RUN_ASSERT_TAILSCALE -eq 1 ] && cat << 'ASSERT_TAILSCALE'
-  echo '=== ASSERT [tailscale]: /etc/tailscale/tailscale.env exists at mode 0600 ==='
-  $INST 'stat -c "%a %n" /etc/tailscale/tailscale.env 2>&1 || echo "FAIL: tailscale.env NOT FOUND"'
-  echo ''
-  echo '=== ASSERT [tailscale]: tailscaled.service is enabled ==='
-  $INST 'systemctl is-enabled tailscaled.service 2>&1'
-  echo ''
-  echo '=== ASSERT [tailscale]: knuckle-tailscale-up.service is enabled ==='
-  $INST 'systemctl is-enabled knuckle-tailscale-up.service 2>&1'
-  echo ''
-  echo '=== ASSERT [tailscale]: env file does NOT contain plaintext in logs ==='
-  $INST 'sudo journalctl -b --no-pager | grep -i "tailscale" | grep -v "Starting\|Started\|Condition" | head -5' || true
-  echo ''
-ASSERT_TAILSCALE
-)
-
-  $([ $RUN_ASSERT_IGNITION -eq 1 ] && cat << 'ASSERT_IGN'
-  echo '=== ASSERT [ignition]: hostname correctly applied ==='
-  $INST 'cat /etc/hostname 2>/dev/null || hostname'
-  echo ''
-  echo '=== ASSERT [ignition]: authorized_keys from Ignition ==='
-  $INST 'cat ~/.ssh/authorized_keys 2>/dev/null | cut -c1-40'
-  echo ''
-  echo '=== ASSERT [ignition]: update strategy applied ==='
-  $INST 'cat /etc/flatcar/update.conf 2>/dev/null | grep -i strategy || echo "update.conf not found"'
-  echo ''
-ASSERT_IGN
-)
-
-  $([ $RUN_ASSERT_SYSEXT -eq 1 ] && cat << 'ASSERT_SYSEXT'
-  echo '=== ASSERT [sysext]: extensions present in /etc/extensions ==='
-  $INST 'ls /etc/extensions/ 2>/dev/null || echo "FAIL: /etc/extensions empty or not found"'
-  echo ''
-  echo '=== ASSERT [sysext]: systemd-sysext status ==='
-  $INST 'sudo systemd-sysext status 2>&1 | head -10'
-  echo ''
-ASSERT_SYSEXT
-)
-
-  echo 'ASSERTIONS_COMPLETE'
-" 2>&1) || { echo "ASSERTIONS_FAILED"; }
-
-ASSERT_DONE=$(echo "$ASSERT_OUT" | grep -c "ASSERTIONS_COMPLETE" || true)
-ASSERT_FAIL=$(echo "$ASSERT_OUT" | grep -c "FAIL:" || true)
+ASSERT_OUT=$(_ghost "ssh $GOPTS -p ${PORT} core@127.0.0.1 'bash /tmp/assert.sh 2>&1'" 2>&1) || true
+ASSERT_OK=$(echo "$ASSERT_OUT" | grep -c "ALL_ASSERTIONS_PASS" || true)
+ASSERT_FAILS=$(echo "$ASSERT_OUT" | grep -c "^FAIL:" || true)
 
 {
-  echo ""
-  echo "### Tier 3 — Installed System: domain assertions"
-  echo ""
-  if [[ $ASSERT_DONE -gt 0 ]]; then
-    echo '```'
-    echo "$ASSERT_OUT"
-    echo '```'
-    echo ""
-    if [[ $ASSERT_FAIL -eq 0 ]]; then
-      echo "**✅ ALL DOMAIN ASSERTIONS PASS** (${ASSERT_FAIL} failures)"
-    else
-      echo "**❌ ${ASSERT_FAIL} DOMAIN ASSERTION(S) FAILED** — see FAIL: lines above"
-    fi
+  echo "### Tier 3 — Installed Flatcar: domain assertions"
+  echo
+  echo '```'
+  echo "$ASSERT_OUT"
+  echo '```'
+  echo
+  if [[ $ASSERT_OK -gt 0 ]]; then
+    echo "**✅ ALL DOMAIN ASSERTIONS PASS**"
   else
-    echo '```'
-    echo "$ASSERT_OUT"
-    echo '```'
-    echo ""
-    echo "**⛔ ASSERTIONS DID NOT COMPLETE**"
+    echo "**❌ DOMAIN ASSERTIONS FAILED** (${ASSERT_FAILS} failure(s) — see FAIL: lines above)"
   fi
+  echo
 } >> "$REPORT"
 
-# Cleanup
-_ghost "kill \$(cat ${WORK}/qemu-installed.pid 2>/dev/null) 2>/dev/null || true" 2>/dev/null || true
+# Cleanup installed VM
+_ghost "kill \$(cat ${WORK_REMOTE}/qemu-installed.pid 2>/dev/null) 2>/dev/null || true" 2>/dev/null || true
 
-# ── 12. Final verdict ─────────────────────────────────────────────────────────
+# Fetch all artifacts from ghost
+_fetch_artifacts
+
+# ── 13. Final verdict ─────────────────────────────────────────────────────────
 {
-  echo ""
   echo "---"
-  echo ""
-  if [[ $ASSERT_DONE -gt 0 ]] && [[ $ASSERT_FAIL -eq 0 ]]; then
+  echo
+  echo "**Artifacts:** \`.qa/runs/${RUN_ID}/\`"
+  echo
+  if [[ $ASSERT_OK -gt 0 ]]; then
     echo "**Verdict: ✅ PASS** — installed system verified, all domain assertions clean"
   else
-    echo "**Verdict: ❌ FAIL** — see assertion failures above"
+    echo "**Verdict: ❌ FAIL** — ${ASSERT_FAILS} assertion(s) failed (see above)"
   fi
 } >> "$REPORT"
 
+if [[ $ASSERT_OK -eq 0 ]]; then
+  _file_issue_on_fail "$REPORT" "$RUNDIR" "Domain assertions failed (${ASSERT_FAILS} failure(s))" || true
+fi
+
+log "Artifacts: ${RUNDIR}/"
 cat "$REPORT"
-[[ $ASSERT_DONE -gt 0 ]] && [[ $ASSERT_FAIL -eq 0 ]] && exit 0 || exit 1
+[[ $ASSERT_OK -gt 0 ]] && exit 0 || exit 1
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+_fetch_artifacts() {
+  log "Fetching artifacts from ghost..."
+  _scp_from $GOPTS -r "$GHOST:${WORK_REMOTE}/" "${RUNDIR}/ghost/" 2>/dev/null || true
+}
+
+_file_issue_on_fail() {
+  local report="$1" rundir="$2" summary="$3"
+  local issue_file="${rundir}/issue-body.md"
+  cat > "$issue_file" << ISSUE_EOF
+## QA Failure: PR #${PR} — ${TITLE}
+
+**Summary:** ${summary}
+**Run:** ${RUN_ID}
+**Commit:** ${SHA}
+**Flatcar:** ${FLATCAR_VER}
+**Labels:** ${LABELS}
+
+### Failing output
+
+\`\`\`
+$(grep -A3 "FAIL\|❌" "$report" | head -30)
+\`\`\`
+
+### Full report
+
+See: \`.qa/runs/${RUN_ID}/report.md\`
+Ghost artifacts: \`.qa/runs/${RUN_ID}/ghost/\`
+
+### To reproduce
+
+\`\`\`bash
+just qa-pr ${PR}
+\`\`\`
+ISSUE_EOF
+
+  log "Issue body written: ${issue_file}"
+  # File it if gh is available and --file-issues flag set
+  if [[ "${FILE_ISSUES:-0}" == "1" ]]; then
+    gh issue create \
+      --repo projectbluefin/knuckle \
+      --title "qa: PR #${PR} — ${summary}" \
+      --body-file "$issue_file" \
+      --label "kind/bug,source:agent" 2>/dev/null && log "Issue filed" || log "Issue filing skipped"
+  else
+    log "To file issue: gh issue create --repo projectbluefin/knuckle --title 'qa: PR #${PR} — ${summary}' --body-file ${issue_file}"
+  fi
+}

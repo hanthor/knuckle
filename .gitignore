@@ -27,6 +27,7 @@ cover.html
 
 # VM testing artifacts
 .vm/
+.qa/
 
 # ISO build artifacts
 .iso-build/
