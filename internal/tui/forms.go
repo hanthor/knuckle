@@ -451,10 +451,13 @@ func (m *Model) viewChannelCards() string {
 		b.WriteString("\n")
 	}
 
-	// Show advanced hint
+	// Show advanced hint + community link
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(
-		"  Ctrl+A advanced options · ↑↓/jk select · enter continue"))
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	link := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+	b.WriteString(dim.Render("  Ctrl+A advanced options · ↑↓/jk select · enter continue"))
+	b.WriteString("\n")
+	b.WriteString(dim.Render("  Join the Flatcar community: ") + link.Render("https://flatcar.org/discord"))
 	b.WriteString("\n")
 
 	return b.String()

@@ -1245,6 +1245,13 @@ func (m *Model) viewDone() string {
 		b.WriteString(dimStyle.Render("    docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu22.04 nvidia-smi") + "\n")
 	}
 
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	link := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+	b.WriteString("\n")
+	b.WriteString(dim.Render("Community & help:") + "\n")
+	b.WriteString("  " + link.Render("https://flatcar.org/discord") + dim.Render("  — Flatcar community on Discord") + "\n")
+	b.WriteString("  " + link.Render("https://www.flatcar.org/docs/") + dim.Render("  — Flatcar documentation") + "\n")
+
 	b.WriteString("\n")
 	if cfg.DryRun {
 		b.WriteString("Press q to exit.\n")

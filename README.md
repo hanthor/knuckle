@@ -150,6 +150,12 @@ internal/wizard/     → step state machine, navigation, validation gates
 - **Security** (`security.yml`) — CodeQL (Go), OSSF Scorecard, dependency-review
 - **Release** (`release.yml`) — triggered on `v*` tags; builds amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`; produces binaries + installer ISOs + cosign bundles
 
+## Community
+
+- [Flatcar on Discord](https://flatcar.org/discord) — chat with the Flatcar community
+- [Flatcar docs](https://www.flatcar.org/docs/) — official documentation
+- [knuckle issues](https://github.com/projectbluefin/knuckle/issues) — file bugs and ideas
+
 ## License
 
 Apache 2.0
