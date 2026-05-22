@@ -1510,7 +1510,6 @@ func TestValidate_ValidGitHubUsername(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
-
 func TestValidate_SwapNegativeSize(t *testing.T) {
 	cfg := &Config{
 		Channel: "stable",
