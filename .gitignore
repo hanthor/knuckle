@@ -6,9 +6,10 @@
 # Go
 vendor/
 
-# IDE
+# IDE / Claude
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 
