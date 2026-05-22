@@ -3,6 +3,8 @@ package ignition
 import (
 	"strings"
 	"testing"
+
+	"github.com/projectbluefin/knuckle/internal/model"
 )
 
 func TestCompileToIgnition_ValidButane(t *testing.T) {
@@ -98,5 +100,14 @@ passwd:
 	}
 	if !strings.Contains(got, "ssh-ed25519") {
 		t.Error("Ignition JSON missing SSH key")
+	}
+}
+
+func TestBuilder_AddStorageLink(t *testing.T) {
+	b := NewBuilder(&model.InstallConfig{})
+	b.AddStorageLink("    - path: /etc/localtime\n      target: /usr/share/zoneinfo/UTC\n")
+	yaml := b.Build()
+	if !strings.Contains(yaml, "localtime") {
+		t.Errorf("Build() output missing storage link: %q", yaml)
 	}
 }

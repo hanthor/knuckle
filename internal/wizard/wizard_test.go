@@ -1864,3 +1864,48 @@ func TestRouteE_ReviewBackToUser_FixAndReadvance(t *testing.T) {
 		t.Error("Butane does not contain the fixed SSH key")
 	}
 }
+
+func TestFetchChannels_CancelledContext(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := w.FetchChannels(ctx)
+	if err == nil {
+		t.Fatal("FetchChannels with cancelled context: expected error, got nil")
+	}
+}
+
+func TestValidateTailscale_EmptyKeyAllowed(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.Config.Sysexts = []model.SysextEntry{{Name: "tailscale", Selected: true}}
+	w.State.CurrentStep = model.StepTailscale
+	w.State.Config.Tailscale.AuthKey = ""
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Errorf("empty Tailscale auth key should be allowed: %v", err)
+	}
+}
+
+func TestValidateTailscale_InvalidKey(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	// Force a tailscale sysext to be selected so the step is reachable
+	w.State.Config.Sysexts = []model.SysextEntry{{Name: "tailscale", Selected: true}}
+	w.State.CurrentStep = model.StepTailscale
+	w.State.Config.Tailscale.AuthKey = "not-a-real-key"
+	err := w.ValidateCurrentStep()
+	if err == nil {
+		t.Fatal("expected error for invalid Tailscale auth key, got nil")
+	}
+}
+
+func TestValidateTailscale_SubnetRouterRequiresRoutes(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.Config.Sysexts = []model.SysextEntry{{Name: "tailscale", Selected: true}}
+	w.State.CurrentStep = model.StepTailscale
+	w.State.Config.Tailscale.AuthKey = "tskey-auth-kExampleKeyID1-ExampleSecretThatIsLongEnough123"
+	w.State.Config.Tailscale.Mode = model.TailscaleModeSubnetRouter
+	w.State.Config.Tailscale.Routes = ""
+	err := w.ValidateCurrentStep()
+	if err == nil {
+		t.Fatal("expected error for subnet router with no routes, got nil")
+	}
+}

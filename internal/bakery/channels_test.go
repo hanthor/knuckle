@@ -2,6 +2,7 @@ package bakery
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -364,5 +365,23 @@ func TestFetchAllChannelsArch_InvalidArch(t *testing.T) {
 	_, err := FetchAllChannelsArch(context.Background(), "ppc64")
 	if err == nil {
 		t.Fatal("expected error for unsupported arch")
+	}
+}
+
+func TestFetchChannelInfoWrapper(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := FetchChannelInfo(ctx, "stable")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("FetchChannelInfo with cancelled context: got %v, want context.Canceled", err)
+	}
+}
+
+func TestFetchAllChannelsWrapper(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := FetchAllChannels(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("FetchAllChannels with cancelled context: got %v, want context.Canceled", err)
 	}
 }

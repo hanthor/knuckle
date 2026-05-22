@@ -561,3 +561,16 @@ func TestFetchSHA256MissingAsset(t *testing.T) {
 		t.Errorf("expected empty Sha256 when no SHA256SUMS asset, got %q", entries[0].Sha256)
 	}
 }
+
+func TestNewHTTPClient(t *testing.T) {
+	c := bakery.NewHTTPClient()
+	if c == nil {
+		t.Fatal("NewHTTPClient() returned nil")
+	}
+	if c.CatalogURL != bakery.DefaultCatalogURL {
+		t.Errorf("CatalogURL = %q, want %q", c.CatalogURL, bakery.DefaultCatalogURL)
+	}
+	if c.HTTP == nil {
+		t.Error("HTTP client field is nil")
+	}
+}

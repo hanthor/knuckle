@@ -625,44 +625,93 @@ func TestSysextName(t *testing.T) {
 }
 
 func TestGateway(t *testing.T) {
-	if err := Gateway("192.168.1.1"); err != nil {
-		t.Errorf("expected valid gateway, got %v", err)
+	tests := []struct {
+		input   string
+		wantErr bool
+	}{
+		{"192.168.1.1", false},
+		{"10.0.0.1", false},
+		{"8.8.8.8", false},
+		{"not-an-ip", true},
+		{"", true},
+		{"256.0.0.1", true},
+		{"192.168.1.1/24", true},
 	}
-	if err := Gateway("notanip"); err == nil {
-		t.Error("expected error for invalid gateway")
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			err := Gateway(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Gateway(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
 	}
 }
 
 func TestDNSServer(t *testing.T) {
-	if err := DNSServer("8.8.8.8"); err != nil {
-		t.Errorf("expected valid DNS, got %v", err)
+	tests := []struct {
+		input   string
+		wantErr bool
+	}{
+		{"8.8.8.8", false},
+		{"1.1.1.1", false},
+		{"192.168.1.1", false},
+		{"not-dns", true},
+		{"", true},
+		{"300.0.0.1", true},
 	}
-	if err := DNSServer("notanip"); err == nil {
-		t.Error("expected error for invalid DNS")
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			err := DNSServer(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("DNSServer(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
 	}
 }
 
 func TestTailscaleAuthKey(t *testing.T) {
-	if err := TailscaleAuthKey("tskey-auth-abcdef1234-secretsecretsecretsecret12"); err != nil {
-		t.Errorf("expected valid key, got %v", err)
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid auth key", "tskey-auth-kExampleKeyID1-ExampleSecretThatIsLongEnough123", false},
+		{"valid client key", "tskey-client-kExampleKeyID1-ExampleSecretThatIsLongEnough12", false},
+		{"empty", "", true},
+		{"wrong prefix", "sk-auth-foo-bar", true},
+		{"missing secret", "tskey-auth-kExampleKeyID1", true},
+		{"too short id", "tskey-auth-k-ExampleSecretThatIsLongEnough123", true},
 	}
-	if err := TailscaleAuthKey("plaintext"); err == nil {
-		t.Error("expected error for invalid key")
-	}
-	if err := TailscaleAuthKey(""); err == nil {
-		t.Error("expected error for empty key")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := TailscaleAuthKey(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("TailscaleAuthKey(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
 	}
 }
 
 func TestTailscaleRoutes(t *testing.T) {
-	if err := TailscaleRoutes("10.0.0.0/24,192.168.1.0/24"); err != nil {
-		t.Errorf("expected valid routes, got %v", err)
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"single CIDR", "10.0.0.0/8", false},
+		{"multiple CIDRs", "10.0.0.0/8,192.168.1.0/24", false},
+		{"with spaces", "10.0.0.0/8, 192.168.1.0/24", false},
+		{"empty", "", true},
+		{"invalid CIDR", "not-a-cidr", true},
+		{"mixed valid invalid", "10.0.0.0/8,bad", true},
 	}
-	if err := TailscaleRoutes(""); err == nil {
-		t.Error("expected error for empty routes")
-	}
-	if err := TailscaleRoutes("notacidr"); err == nil {
-		t.Error("expected error for invalid CIDR")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := TailscaleRoutes(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("TailscaleRoutes(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
 	}
 }
 
