@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+var channelHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // ChannelInfo holds version details for a Flatcar release channel.
 type ChannelInfo struct {
 	Channel    string // stable, beta, alpha
@@ -180,8 +182,7 @@ func httpGet(ctx context.Context, url string) (string, error) {
 	}
 	req.Header.Set("User-Agent", "knuckle/1.0")
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := channelHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
