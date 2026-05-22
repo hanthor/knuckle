@@ -30,6 +30,37 @@ _scp_to()    { scp $GOPTS "$@"; }
 _scp_from()  { scp $GOPTS "$@"; }
 log()        { echo "  [qa ${RUN_ID}] $*" >&2; }
 
+_fetch_artifacts() {
+  log "Fetching artifacts from ghost..."
+  _scp_from $GOPTS -r "$GHOST:${WORK_REMOTE}/" "${RUNDIR}/ghost/" 2>/dev/null || true
+}
+
+_file_issue_on_fail() {
+  local report="$1" rundir="$2" summary="$3"
+  local issue_file="${rundir}/issue-body.md"
+  cat > "$issue_file" << ISSUE_EOF
+## QA Failure: PR #${PR} — ${TITLE}
+
+**Summary:** ${summary}
+**Run:** ${RUN_ID}
+**Commit:** ${SHA}
+**Flatcar:** ${FLATCAR_VER}
+**Labels:** ${LABELS}
+
+### Failing output
+
+\`\`\`
+$(grep -A3 "FAIL\|\u274c" "$report" | head -30)
+\`\`\`
+
+### To reproduce
+\`\`\`bash
+just qa-pr ${PR}
+\`\`\`
+ISSUE_EOF
+  log "Issue body: ${issue_file}"
+}
+
 mkdir -p "$RUNDIR"
 
 # ── 1. PR metadata ────────────────────────────────────────────────────────────
@@ -627,52 +658,3 @@ log "Artifacts: ${RUNDIR}/"
 cat "$REPORT"
 [[ $ASSERT_OK -gt 0 ]] && exit 0 || exit 1
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
-_fetch_artifacts() {
-  log "Fetching artifacts from ghost..."
-  _scp_from $GOPTS -r "$GHOST:${WORK_REMOTE}/" "${RUNDIR}/ghost/" 2>/dev/null || true
-}
-
-_file_issue_on_fail() {
-  local report="$1" rundir="$2" summary="$3"
-  local issue_file="${rundir}/issue-body.md"
-  cat > "$issue_file" << ISSUE_EOF
-## QA Failure: PR #${PR} — ${TITLE}
-
-**Summary:** ${summary}
-**Run:** ${RUN_ID}
-**Commit:** ${SHA}
-**Flatcar:** ${FLATCAR_VER}
-**Labels:** ${LABELS}
-
-### Failing output
-
-\`\`\`
-$(grep -A3 "FAIL\|❌" "$report" | head -30)
-\`\`\`
-
-### Full report
-
-See: \`.qa/runs/${RUN_ID}/report.md\`
-Ghost artifacts: \`.qa/runs/${RUN_ID}/ghost/\`
-
-### To reproduce
-
-\`\`\`bash
-just qa-pr ${PR}
-\`\`\`
-ISSUE_EOF
-
-  log "Issue body written: ${issue_file}"
-  # File it if gh is available and --file-issues flag set
-  if [[ "${FILE_ISSUES:-0}" == "1" ]]; then
-    gh issue create \
-      --repo projectbluefin/knuckle \
-      --title "qa: PR #${PR} — ${summary}" \
-      --body-file "$issue_file" \
-      --label "kind/bug,source:agent" 2>/dev/null && log "Issue filed" || log "Issue filing skipped"
-  else
-    log "To file issue: gh issue create --repo projectbluefin/knuckle --title 'qa: PR #${PR} — ${summary}' --body-file ${issue_file}"
-  fi
-}
