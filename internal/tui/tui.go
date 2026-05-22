@@ -190,6 +190,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Wizard.ApplyGitHubKeys(msg.keys, detectLocalSSHKeys(), m.sshKeyInput)
 		if !m.Wizard.HasAnyAuthentication() {
 			m.err = fmt.Errorf("no SSH keys found — add a key manually, set a password, or use a GitHub user with public keys")
+			m.initForm()
+			if m.activeForm != nil {
+				return m, m.activeForm.Init()
+			}
 			return m, nil
 		}
 		if err := m.Wizard.Next(); err != nil {

@@ -96,11 +96,9 @@ func (w *Wizard) ApplyUserStep(in UserStepInput) error {
 
 	manual := SplitSSHKeys(in.ManualKey)
 	merged := MergeSSHKeys(in.LocalKeys, manual)
-	if len(merged) > 0 {
-		cfg.SSHKeys = merged
-		if len(cfg.Users) > 0 {
-			cfg.Users[0].SSHKeys = merged
-		}
+	cfg.SSHKeys = merged
+	if len(cfg.Users) > 0 {
+		cfg.Users[0].SSHKeys = merged
 	}
 	return nil
 }

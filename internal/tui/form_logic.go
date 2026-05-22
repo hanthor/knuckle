@@ -93,6 +93,7 @@ func (m *Model) onFormComplete() tea.Cmd {
 		}
 		// Async GitHub key fetch (merges with local + manual keys on return)
 		if m.githubUserInput != "" {
+			m.err = nil
 			m.fetching = true
 			username := strings.TrimPrefix(m.githubUserInput, "@")
 			return func() tea.Msg {
