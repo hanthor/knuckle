@@ -1563,3 +1563,39 @@ func TestRun_InstallerError(t *testing.T) {
 		t.Fatal("expected error from installer failure, got nil")
 	}
 }
+func TestValidate_SwapSizeNegative(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vda",
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 test@qa"}}},
+		Swap:    &SwapConfig{Enabled: true, SizeMB: -1},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for negative swap size, got nil")
+	}
+}
+
+func TestValidate_SwapSizeExceedsMax(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vda",
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 test@qa"}}},
+		Swap:    &SwapConfig{Enabled: true, SizeMB: 999999},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for swap size > MaxSwapSizeMB, got nil")
+	}
+}
+
+func TestValidate_SwapSizeAtMax(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vda",
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 test@qa"}}},
+		Swap:    &SwapConfig{Enabled: true, SizeMB: model.MaxSwapSizeMB},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("size_mb at exact maximum should be valid, got: %v", err)
+	}
+}
