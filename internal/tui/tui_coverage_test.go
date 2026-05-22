@@ -229,3 +229,72 @@ func TestSysextDelegateUpdate_IsNoop(t *testing.T) {
 		t.Errorf("Update() = %v, want nil (no-op)", cmd)
 	}
 }
+func TestViewSysext_EmptyFallback(t *testing.T) {
+	w := newTestWizard()
+	m := New(w)
+	m.Wizard.State.Sysexts = nil
+	out := m.viewSysext()
+	if !strings.Contains(out, "No extensions available") {
+		t.Errorf("empty sysext state should mention unavailability: %q", out)
+	}
+}
+
+func TestViewSysext_FallbackRendering(t *testing.T) {
+	w := newTestWizard()
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "docker", Version: "28.0.0", Category: "container", SupportTier: bakery.TierIntegrated, Selected: true},
+		{Name: "tailscale", Version: "1.0.0", Category: "networking", SupportTier: bakery.TierMaintained},
+	}
+	m := New(w)
+	m.sysextListReady = false
+	m.cursor = 0
+	out := m.viewSysext()
+	if !strings.Contains(out, "docker") {
+		t.Errorf("viewSysext fallback missing docker: %q", out)
+	}
+	if !strings.Contains(out, "[✓]") {
+		t.Errorf("viewSysext fallback missing selected checkmark: %q", out)
+	}
+}
+
+func TestViewSysext_SelectedCountCoverage(t *testing.T) {
+	w := newTestWizard()
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "a", Selected: true},
+		{Name: "b", Selected: true},
+		{Name: "c", Selected: false},
+	}
+	m := New(w)
+	m.sysextListReady = false
+	out := m.viewSysext()
+	if !strings.Contains(out, "2 selected") {
+		t.Errorf("viewSysext should show selected count: %q", out)
+	}
+}
+
+func TestViewSysext_NvidiaGPUBanner(t *testing.T) {
+	w := newTestWizard()
+	w.State.NvidiaGPUDetected = true
+	w.State.Sysexts = []model.SysextEntry{{Name: "docker"}}
+	m := New(w)
+	m.sysextListReady = false
+	out := m.viewSysext()
+	if !strings.Contains(out, "NVIDIA") {
+		t.Errorf("viewSysext should show NVIDIA banner when GPU detected: %q", out)
+	}
+}
+
+func TestViewSysext_CursorHighlight(t *testing.T) {
+	w := newTestWizard()
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "alpha", SupportTier: bakery.TierIntegrated},
+		{Name: "beta", SupportTier: bakery.TierIntegrated},
+	}
+	m := New(w)
+	m.sysextListReady = false
+	m.cursor = 1
+	out := m.viewSysext()
+	if !strings.Contains(out, "beta") {
+		t.Errorf("cursor item should appear in output: %q", out)
+	}
+}
