@@ -331,9 +331,15 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("update_strategy: must be reboot, off, or etcd-lock (got %q)", c.UpdateStrategy)
 	}
 
-	// Swap size must be non-negative if explicit
-	if c.Swap != nil && c.Swap.SizeMB < 0 {
-		return fmt.Errorf("swap.size_mb: must be ≥ 0 (got %d)", c.Swap.SizeMB)
+	// Swap size must be within [0, MaxSwapSizeMB]
+	if c.Swap != nil {
+		if c.Swap.SizeMB < 0 {
+			return fmt.Errorf("swap.size_mb: must be ≥ 0 (got %d)", c.Swap.SizeMB)
+		}
+		if c.Swap.SizeMB > model.MaxSwapSizeMB {
+			return fmt.Errorf("swap.size_mb: %d MiB exceeds maximum %d MiB (%.0f GiB)",
+				c.Swap.SizeMB, model.MaxSwapSizeMB, float64(model.MaxSwapSizeMB)/1024)
+		}
 	}
 
 	// Tailscale

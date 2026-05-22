@@ -82,6 +82,12 @@ type SwapConfig struct {
 // for home-server workloads; explicit SizeMB always overrides.
 const DefaultSwapSizeMB = 4096
 
+// MaxSwapSizeMB is the upper bound accepted by headless Config.Validate().
+// 32 GiB (8× the default) covers any realistic home-server workload while
+// preventing a misconfigured size_mb from hanging fallocate for hours or
+// silently exhausting the target disk.
+const MaxSwapSizeMB = 32768
+
 // TailscaleConfig holds optional Tailscale provisioning for the installed system.
 // Populated only when the tailscale sysext is selected. AuthKey is written to
 // /etc/tailscale/tailscale.env (mode 0600) and consumed by a oneshot systemd
