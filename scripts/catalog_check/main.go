@@ -49,22 +49,14 @@ func main() {
 		return entries[i].Name < entries[j].Name
 	})
 
-	var missing []bakery.MissingEntry
-	var covered int
+	covered, missing := checkCatalog(entries)
 
 	for _, e := range entries {
-		meta, ok := bakery.Lookup(e.Name)
-		if !ok {
-			missing = append(missing, bakery.MissingEntry{
-				Name:    e.Name,
-				Version: e.Version,
-				URL:     e.URL,
-			})
-			fmt.Printf("  MISSING  %-22s  v%s\n", e.Name, e.Version)
-		} else {
-			covered++
+		if meta, ok := bakery.Lookup(e.Name); ok {
 			fmt.Printf("  ok       %-22s  v%-12s  %s · %s\n",
 				e.Name, e.Version, meta.SupportTier, meta.Category)
+		} else {
+			fmt.Printf("  MISSING  %-22s  v%s\n", e.Name, e.Version)
 		}
 	}
 
