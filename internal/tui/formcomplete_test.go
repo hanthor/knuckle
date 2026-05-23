@@ -237,3 +237,87 @@ func TestOnFormComplete_AdvanceFails_ShowsError(t *testing.T) {
 		}
 	}
 }
+
+func TestOnFormComplete_Welcome_WithIgnitionURL_JumpsToStorage(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepWelcome
+	w.State.Config.Channel = "stable"
+	w.State.Config.IgnitionURL = "https://example.com/config.ign"
+	m := New(w)
+
+	_ = m.onFormComplete()
+
+	if m.err != nil {
+		t.Errorf("expected no error, got: %v", m.err)
+	}
+	if m.Wizard.State.CurrentStep != model.StepStorage {
+		t.Errorf("expected jump to StepStorage, got %v", m.Wizard.State.CurrentStep)
+	}
+}
+
+func TestOnFormComplete_Tailscale_EmptyKey_Advances(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepTailscale
+	w.State.Config.Sysexts = []model.SysextEntry{
+		{Name: "tailscale", Selected: true},
+	}
+	w.State.Config.Users = []model.UserConfig{
+		{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 test"}},
+	}
+	m := New(w)
+	m.tailscaleAuthKeyIn = "" // empty key is valid (skip tailscale)
+
+	_ = m.onFormComplete()
+
+	if m.err != nil {
+		t.Errorf("expected no error for empty tailscale key, got: %v", m.err)
+	}
+	if m.Wizard.State.CurrentStep == model.StepTailscale {
+		t.Error("expected to advance past StepTailscale")
+	}
+}
+
+func TestOnFormComplete_Tailscale_InvalidKey_ShowsError(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepTailscale
+	w.State.Config.Sysexts = []model.SysextEntry{
+		{Name: "tailscale", Selected: true},
+	}
+	w.State.Config.Users = []model.UserConfig{
+		{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 test"}},
+	}
+	m := New(w)
+	m.tailscaleAuthKeyIn = "not-a-valid-tskey"
+
+	_ = m.onFormComplete()
+
+	if m.err == nil {
+		t.Fatal("expected error for invalid tailscale key, got nil")
+	}
+	if m.Wizard.State.CurrentStep != model.StepTailscale {
+		t.Errorf("expected to stay on StepTailscale, got %v", m.Wizard.State.CurrentStep)
+	}
+}
+
+func TestOnFormComplete_Tailscale_ValidKey_Advances(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepTailscale
+	w.State.Config.Sysexts = []model.SysextEntry{
+		{Name: "tailscale", Selected: true},
+	}
+	w.State.Config.Users = []model.UserConfig{
+		{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 test"}},
+	}
+	m := New(w)
+	m.tailscaleAuthKeyIn = "tskey-auth-kSomeID12345-SomeSecretThatIsLongEnough1234"
+	m.tailscaleModeIn = model.TailscaleModeConnect
+
+	_ = m.onFormComplete()
+
+	if m.err != nil {
+		t.Errorf("expected no error for valid tailscale key, got: %v", m.err)
+	}
+	if m.Wizard.State.CurrentStep == model.StepTailscale {
+		t.Error("expected to advance past StepTailscale with valid key")
+	}
+}
