@@ -190,6 +190,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = fmt.Errorf("%w — edit the username and press Enter to retry, or clear it and add an SSH key or password instead", msg.err)
 			return m, nil
 		}
+		for _, k := range msg.keys {
+			if err := validate.SSHPublicKey(k); err != nil {
+				m.err = fmt.Errorf("invalid SSH key from GitHub: %w", err)
+				return m, nil
+			}
+		}
 		m.Wizard.ApplyGitHubKeys(msg.keys, detectLocalSSHKeys(), m.sshKeyInput)
 		if !m.Wizard.HasAnyAuthentication() {
 			m.err = fmt.Errorf("no SSH keys found — add a key manually, set a password, or use a GitHub user with public keys")
