@@ -478,7 +478,10 @@ cat > "$ASSERT_SCRIPT" << ASSERT_SCRIPT_EOF
 #!/bin/bash
 # Domain assertions for PR #${PR}: ${TITLE}
 # Run inside the booted installed Flatcar (not the installer).
-set -euo pipefail
+# Note: -e is intentionally omitted so all assertions run even when one fails.
+# The FAIL counter tracks failures; set -e would exit on the first mismatch
+# and truncate the report before recording later evidence.
+set -uo pipefail
 FAIL=0
 
 check() {
@@ -509,8 +512,15 @@ grep -E "VERSION_ID|PRETTY_NAME" /etc/os-release
 echo ""
 
 echo "=== BASELINE: hostname matches config ==="
-hostname
-[ "\$(hostname)" = "qa-pr-${PR}" ] || { echo "FAIL: expected qa-pr-${PR}, got \$(hostname)"; FAIL=1; }
+ACTUAL_HOST=\$(hostname)
+echo "\${ACTUAL_HOST}"
+if [ "\${ACTUAL_HOST}" != "qa-pr-${PR}" ]; then
+  echo "FAIL: hostname mismatch: got '\${ACTUAL_HOST}', want 'qa-pr-${PR}'"
+  echo "  (Ignition hostname field may not have propagated — check knuckle-install.log)"
+  FAIL=1
+else
+  echo "ok"
+fi
 echo ""
 
 echo "=== BASELINE: core user SSH key (Ignition applied) ==="
@@ -639,8 +649,8 @@ exit $FAIL
 FINAL
 
 # SCP assertion script to ghost, then into the VM
-_scp_to $GOPTS "$ASSERT_SCRIPT" "$GHOST:${WORK_REMOTE}/assert.sh"
-_ghost "scp $GOPTS -P ${PORT} ${WORK_REMOTE}/assert.sh core@127.0.0.1:/tmp/assert.sh"
+_scp_to $GOPTS "$ASSERT_SCRIPT" "$GHOST:${WORK_REMOTE}/assert.sh" || true
+_ghost "scp $GOPTS -P ${PORT} ${WORK_REMOTE}/assert.sh core@127.0.0.1:/tmp/assert.sh" || true
 
 ASSERT_OUT=$(_ghost "ssh $GOPTS -p ${PORT} core@127.0.0.1 'bash /tmp/assert.sh 2>&1'" 2>&1) || true
 ASSERT_OK=$(echo "$ASSERT_OUT" | grep -c "ALL_ASSERTIONS_PASS" || true)
