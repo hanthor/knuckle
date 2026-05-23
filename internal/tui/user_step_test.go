@@ -437,3 +437,34 @@ func TestEnterUserStep_WithLocalKeys_Advances(t *testing.T) {
 		t.Errorf("expected to advance past StepUser when local SSH key is present, still on StepUser")
 	}
 }
+
+// --- fetchKeysMsg: invalid key from GitHub ---
+
+// TestFetchKeysInvalidKey_SetsError verifies that when GitHub returns a key
+// that fails validate.SSHPublicKey(), the model sets an error and does not
+// call ApplyGitHubKeys — preventing malformed keys from reaching Ignition.
+func TestFetchKeysInvalidKey_SetsError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUser
+	w.State.Config.Users = []model.UserConfig{{Username: "core"}}
+
+	m := New(w)
+	// "not-a-real-key" will fail SSHPublicKey() validation.
+	newModel, _ := m.Update(fetchKeysMsg{keys: []string{"not-a-real-key"}, err: nil})
+	got := newModel.(*Model)
+
+	if got.err == nil {
+		t.Fatal("expected err to be set for invalid GitHub SSH key, got nil")
+	}
+	if !strings.Contains(got.err.Error(), "invalid SSH key from GitHub") {
+		t.Errorf("expected 'invalid SSH key from GitHub' in error, got: %v", got.err)
+	}
+	if got.Wizard.State.CurrentStep != model.StepUser {
+		t.Errorf("expected to remain on StepUser after invalid key, got %v", got.Wizard.State.CurrentStep)
+	}
+	if len(got.Wizard.State.Config.Users[0].SSHKeys) != 0 {
+		t.Errorf("invalid key should not be stored in config, got: %v", got.Wizard.State.Config.Users[0].SSHKeys)
+	}
+}
