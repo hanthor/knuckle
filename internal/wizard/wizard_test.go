@@ -2010,3 +2010,65 @@ func TestValidateUser_InvalidHostname(t *testing.T) {
 		t.Fatal("expected error for invalid hostname, got nil")
 	}
 }
+
+// ── validateTailscale: valid key success path ─────────────────────────────────
+
+func TestValidateTailscale_ValidKeyNonSubnetRouter(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.CurrentStep = model.StepTailscale
+	w.State.Config.Sysexts = []model.SysextEntry{{Name: "tailscale", Selected: true}}
+	w.State.Config.Tailscale.AuthKey = "tskey-auth-kSomeID12345-SomeSecretThatIsLongEnough1234"
+	w.State.Config.Tailscale.Mode = model.TailscaleModeConnect
+	if err := w.ValidateCurrentStep(); err != nil {
+		t.Errorf("valid tailscale key with connect mode should pass, got: %v", err)
+	}
+}
+
+// ── validateNetwork: gateway and DNS error paths ──────────────────────────────
+
+func TestValidateNetwork_InvalidGateway(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.CurrentStep = model.StepNetwork
+	w.State.Config.Network = model.NetworkConfig{
+		Mode:      model.NetworkStatic,
+		Interface: "eth0",
+		Address:   "192.168.1.10/24",
+		Gateway:   "not-an-ip",
+	}
+	err := w.ValidateCurrentStep()
+	if err == nil {
+		t.Fatal("expected error for invalid gateway, got nil")
+	}
+}
+
+func TestValidateNetwork_InvalidDNSServer(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.CurrentStep = model.StepNetwork
+	w.State.Config.Network = model.NetworkConfig{
+		Mode:      model.NetworkStatic,
+		Interface: "eth0",
+		Address:   "192.168.1.10/24",
+		Gateway:   "192.168.1.1",
+		DNS:       []string{"not-a-dns-ip"},
+	}
+	err := w.ValidateCurrentStep()
+	if err == nil {
+		t.Fatal("expected error for invalid DNS server, got nil")
+	}
+}
+
+// ── validateUser: invalid global SSHKey ──────────────────────────────────────
+
+func TestValidateUser_InvalidGlobalSSHKey(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.CurrentStep = model.StepUser
+	w.State.Config.Users = []model.UserConfig{
+		{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 ok"}},
+	}
+	// Config-level SSHKeys (separate from per-user) with an invalid entry.
+	w.State.Config.SSHKeys = []string{"not-a-valid-key"}
+	err := w.ValidateCurrentStep()
+	if err == nil {
+		t.Fatal("expected error for invalid global SSH key, got nil")
+	}
+}
