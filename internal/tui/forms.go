@@ -473,10 +473,10 @@ func (m *Model) viewChannelCards() string {
 		if meta.version != "" {
 			ver = versionStyle.Render("v" + meta.version)
 		}
-		// Pad between name and version
-		padding := 60 - 4 - len(meta.name) - len("v"+meta.version)
+		// Pad between name and version: ensure non-negative (handles long names)
+		padding := 60 - 4 - len(displayName) - len("v"+meta.version)
 		if padding < 1 {
-			padding = 1
+			padding = 1 // Minimum 1 space separator
 		}
 		card.WriteString(cursor + name + strings.Repeat(" ", padding) + ver)
 		card.WriteString("\n")
