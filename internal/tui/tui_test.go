@@ -696,3 +696,60 @@ func TestNvidiaCharacterKeysAreNoOp(t *testing.T) {
 		t.Errorf("nvidia step should have no fields, got %d", len(m.fields))
 	}
 }
+
+func TestViewUpdateReboot(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUpdate
+	w.State.Config.UpdateStrategy.RebootStrategy = "reboot"
+	m := New(w)
+	m.cursor = 0
+	m.width = 120
+
+	view := m.View()
+
+	if !strings.Contains(view, "Update Strategy") {
+		t.Error("view should contain 'Update Strategy' header")
+	}
+	if !strings.Contains(view, "reboot") && !strings.Contains(view, "Recommended") {
+		t.Error("view should contain reboot option")
+	}
+	if !strings.Contains(view, "▸ reboot") {
+		t.Error("reboot should be highlighted with cursor")
+	}
+}
+
+func TestViewUpdateOff(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUpdate
+	w.State.Config.UpdateStrategy.RebootStrategy = "off"
+	m := New(w)
+	m.cursor = 1
+	m.width = 120
+
+	view := m.View()
+
+	if !strings.Contains(view, "▸ off") {
+		t.Error("off option should be highlighted at cursor 1")
+	}
+	if !strings.Contains(view, "never applied automatically") {
+		t.Error("view should show off strategy description")
+	}
+}
+
+func TestViewUpdateEtcdLock(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUpdate
+	w.State.Config.UpdateStrategy.RebootStrategy = "etcd-lock"
+	m := New(w)
+	m.cursor = 2
+	m.width = 120
+
+	view := m.View()
+
+	if !strings.Contains(view, "▸ etcd-lock") {
+		t.Error("etcd-lock option should be highlighted at cursor 2")
+	}
+	if !strings.Contains(view, "etcd distributed lock") {
+		t.Error("view should show etcd-lock strategy description")
+	}
+}
