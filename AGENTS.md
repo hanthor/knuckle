@@ -362,6 +362,9 @@ gh pr diff $PR --repo projectbluefin/knuckle
 > Read your review back. For every "LGTM" ask: is this verified from the diff, or assumed?
 > For every warning ask: would you accept this explanation if you were the author?
 
+**Never post a review to GitHub until Step 3 (ghost test) passes.**
+The review and test report are posted together as one comment in Step 5.
+
 **Submit the review** via `gh pr review` or MCP tools. Use `APPROVE`,
 `REQUEST_CHANGES`, or `COMMENT`. Do not open a new PR for fixes — push to
 the existing branch.
@@ -474,15 +477,32 @@ gh pr comment $PR --repo projectbluefin/knuckle \
 
 **Queueing:**
 ```bash
+# Before queuing: check the PR is not DIRTY
+STATE=$(gh pr view $PR --repo projectbluefin/knuckle --json mergeStateStatus --jq .mergeStateStatus)
+[[ "$STATE" == "DIRTY" ]] && {
+  # Try GitHub rebase first
+  gh pr update-branch $PR --repo projectbluefin/knuckle || {
+    echo "Manual rebase required — see Step 6"
+    exit 1
+  }
+}
 gh pr merge $PR --repo projectbluefin/knuckle
-# (no --squash flag — merge strategy is set by the queue ruleset)
 ```
 
 ---
 
 ### Step 6 — Conflict resolution (if PR is DIRTY)
 
-Never open a new PR for a rebase. Push to the **existing branch**:
+Never open a new PR for a rebase. Push to the existing branch.
+Check for file overlap before resolving — if the same file appears in multiple
+open PRs, review them sequentially (queue one, wait for merge, then review next).
+
+```bash
+# 0. Check if GitHub can do it automatically
+gh pr update-branch $PR --repo projectbluefin/knuckle && exit 0
+```
+
+Then proceed with local rebase only if the above fails.
 
 ```bash
 # 1. Fetch the PR head
@@ -496,11 +516,13 @@ git cherry-pick pr${PR}-head   # or git merge --no-commit pr${PR}-head
 git add <resolved files> && git cherry-pick --continue
 
 # 4. Verify
-just ci   # must be green
+go build ./...   # MUST exit 0 before git add
+just ci          # must be green
 
 # 5. Push to the EXISTING PR branch (maintainerCanModify: true required)
 git remote add pr-author git@github.com:<AUTHOR>/knuckle.git 2>/dev/null || true
-git push pr-author fix/pr${PR}-rebased:<ORIGINAL_BRANCH> --force
+git fetch upstream main && git rebase upstream/main
+git push pr-author fix/pr${PR}-rebased:<ORIGINAL_BRANCH> --force-with-lease
 
 # 6. Queue (CI will re-run on the new head)
 gh pr merge $PR --repo projectbluefin/knuckle
