@@ -67,3 +67,14 @@ func TestSpyRunner_KeyedResponse_RunWithInput(t *testing.T) {
 		t.Errorf("Stdout = %q, want hello", res.Stdout)
 	}
 }
+
+func TestRealRunner_RunWithInput_CommandNotFound(t *testing.T) {
+	// A missing binary causes cmd.Run() to return *exec.Error (not *exec.ExitError),
+	// so the type assertion fails and RunWithInput falls through to the generic
+	// "command %q failed" error path.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	_, err := NewRealRunner(logger).RunWithInput(context.Background(), "stdin-data", "/no-such-binary-xyz-abc")
+	if err == nil {
+		t.Fatal("expected error for missing binary, got nil")
+	}
+}

@@ -34,3 +34,22 @@ func TestTruncateDescription_Empty(t *testing.T) {
 		t.Errorf("got %q, want empty", got)
 	}
 }
+
+// ── parseLinkNext: missing branches ──────────────────────────────────────────
+
+func TestParseLinkNext_NoSemicolon_Skipped(t *testing.T) {
+	// A part with no semicolon has len(segments) < 2 → continue; the
+	// function then exhausts all parts and returns ("", false).
+	url, ok := parseLinkNext(`<https://api.github.com/page=2>`)
+	if ok || url != "" {
+		t.Errorf("parseLinkNext(no-semicolon) = (%q, %v), want (\"\", false)", url, ok)
+	}
+}
+
+func TestParseLinkNext_NonEmpty_NoNext(t *testing.T) {
+	// Non-empty header with rel="last" only — no rel="next" match → ("", false).
+	url, ok := parseLinkNext(`<https://api.github.com/page=5>; rel="last"`)
+	if ok || url != "" {
+		t.Errorf("parseLinkNext(last-only) = (%q, %v), want (\"\", false)", url, ok)
+	}
+}
