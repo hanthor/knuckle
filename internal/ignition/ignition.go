@@ -253,7 +253,7 @@ storage:
 {{- if .Timezone}}
   links:
     - path: /etc/localtime
-      target: "/usr/share/zoneinfo/{{.Timezone}}"
+      target: "/usr/share/zoneinfo/{{.Timezone | yamlEscape}}"
       overwrite: true
 {{- end}}
 systemd:
