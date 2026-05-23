@@ -110,6 +110,7 @@ cover-check:
         [model]=90  [validate]=85  [ignition]=85  [github]=90
         [bakery]=80 [probe]=80     [runner]=80    [install]=70
         [headless]=70 [wizard]=70  [iso]=70       [tui]=70
+        [demo]=100
     )
     fail=0
     for pkg in "${!targets[@]}"; do
@@ -128,6 +129,8 @@ cover-check:
             echo "ok    internal/${pkg}  ${pct}%  (target ${targets[$pkg]}%)"
         fi
     done
+    # Skip cmd packages (main functions can't be unit tested)
+    echo "ok    cmd/*  (skipped — main functions untestable)"
     exit $fail
 
 # Quick headless dry-run test (no VM needed)
