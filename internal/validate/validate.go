@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"os"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/projectbluefin/knuckle/internal/model"
 )
@@ -132,6 +134,24 @@ func DiskPath(s string) error {
 	}
 	if strings.Contains(s, "..") {
 		return fmt.Errorf("disk path must not contain path traversal")
+	}
+	return nil
+}
+
+// BlockDevice checks that path exists on the host and is a block device.
+// Call this after DiskPath() in contexts where the local filesystem is available
+// (headless mode, pre-install checks). Do not call from pure format validators.
+func BlockDevice(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("disk %s not found — check available disks with `lsblk`", path)
+		}
+		return fmt.Errorf("disk %s: %w", path, err)
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || st.Mode&syscall.S_IFMT != syscall.S_IFBLK {
+		return fmt.Errorf("disk %s is not a block device", path)
 	}
 	return nil
 }
