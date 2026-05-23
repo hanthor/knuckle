@@ -472,3 +472,79 @@ func TestHandleKey_EscGoesBack(t *testing.T) {
 }
 
 var errTest = fmt.Errorf("test error")
+
+// ── spinner.TickMsg and progress.FrameMsg ─────────────────────────────────────
+
+func TestUpdate_SpinnerTickMsg(t *testing.T) {
+	w := newTestWizard()
+	m := New(w)
+	// spinner.TickMsg is a concrete type from the bubbles/spinner package;
+	// fire it through Update and confirm the model still runs without panic.
+	tickMsg := m.spinner.Tick()
+	newModel, cmd := m.Update(tickMsg)
+	if newModel == nil {
+		t.Fatal("Update returned nil model for spinner.TickMsg")
+	}
+	if cmd == nil {
+		t.Error("expected a follow-up cmd from spinner tick")
+	}
+}
+
+func TestUpdate_ProgressFrameMsg(t *testing.T) {
+	w := newTestWizard()
+	m := New(w)
+	// Simulate a progress.FrameMsg by setting progress in motion then
+	// driving the animation one frame.
+	_, setCmd := m.Update(m.progress.SetPercent(0.5))
+	if setCmd == nil {
+		t.Skip("progress.SetPercent returned nil cmd, can't drive frame")
+	}
+	frameMsg := setCmd()
+	newModel, _ := m.Update(frameMsg)
+	if newModel == nil {
+		t.Fatal("Update returned nil model for progress.FrameMsg")
+	}
+}
+
+// ── WindowSizeMsg with active form ────────────────────────────────────────────
+
+func TestUpdate_WindowSizeMsg_WithActiveForm(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepNetwork
+	m := New(w)
+	m.initForm() // sets m.activeForm
+	if m.activeForm == nil {
+		t.Skip("initForm did not set activeForm for StepNetwork")
+	}
+	newModel, _ := m.Update(tea.WindowSizeMsg{Width: 200, Height: 50})
+	got := newModel.(*Model)
+	if got.width != 200 || got.height != 50 {
+		t.Errorf("size not propagated: got %dx%d", got.width, got.height)
+	}
+}
+
+// ── ctrl+c second-press quits from Update ────────────────────────────────────
+
+func TestUpdate_CtrlC_FirstPress_SetsConfirm(t *testing.T) {
+	w := newTestWizard()
+	m := New(w)
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := newModel.(*Model)
+	if !got.confirmQuit {
+		t.Error("first ctrl+c should set confirmQuit")
+	}
+}
+
+func TestUpdate_CtrlC_SecondPress_Quits(t *testing.T) {
+	w := newTestWizard()
+	m := New(w)
+	m.confirmQuit = true
+	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := newModel.(*Model)
+	if !got.quitting {
+		t.Error("second ctrl+c should set quitting")
+	}
+	if cmd == nil {
+		t.Error("second ctrl+c should return a quit cmd")
+	}
+}

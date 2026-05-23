@@ -1,6 +1,12 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/projectbluefin/knuckle/internal/model"
+)
 
 func TestMergeKeysVariadic(t *testing.T) {
 	a := []string{"ssh-ed25519 AAAA local@host"}
@@ -47,5 +53,98 @@ func TestMergeKeysPreservesManualOnGitHubFetch(t *testing.T) {
 		if !found[mk] {
 			t.Errorf("manual key %q was dropped after GitHub fetch", mk)
 		}
+	}
+}
+
+// ── handleKey: ctrl+c, q, r edge cases ───────────────────────────────────────
+
+func TestHandleKey_CtrlC_FirstPress(t *testing.T) {
+	w := newTestWizard()
+	m := New(w)
+	newModel, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := newModel.(*Model)
+	if !got.confirmQuit {
+		t.Error("first ctrl+c in handleKey should set confirmQuit")
+	}
+	if got.err == nil {
+		t.Error("expected error message for ctrl+c first press")
+	}
+}
+
+func TestHandleKey_CtrlC_SecondPress_Quits(t *testing.T) {
+	w := newTestWizard()
+	m := New(w)
+	m.confirmQuit = true
+	newModel, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := newModel.(*Model)
+	if !got.quitting {
+		t.Error("second ctrl+c in handleKey should set quitting")
+	}
+	if cmd == nil {
+		t.Error("expected quit cmd from second ctrl+c")
+	}
+}
+
+func TestHandleKey_Q_NoFields_FirstPress(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepWelcome
+	m := New(w)
+	m.fields = nil // no fields → q triggers confirm-quit
+	newModel, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	got := newModel.(*Model)
+	if !got.confirmQuit {
+		t.Error("first q with no fields should set confirmQuit")
+	}
+}
+
+func TestHandleKey_Q_NoFields_SecondPress_Quits(t *testing.T) {
+	w := newTestWizard()
+	m := New(w)
+	m.fields = nil
+	m.confirmQuit = true
+	newModel, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	got := newModel.(*Model)
+	if !got.quitting {
+		t.Error("second q with no fields should set quitting")
+	}
+	if cmd == nil {
+		t.Error("expected quit cmd from second q")
+	}
+}
+
+func TestHandleKey_Q_WithFields_AppendsChar(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepStorage
+	m := New(w)
+	m.fields = []field{{label: "Disk", value: ""}}
+	m.fieldIdx = 0
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if m.fields[0].value != "q" {
+		t.Errorf("q in field mode should append 'q', got %q", m.fields[0].value)
+	}
+}
+
+func TestHandleKey_R_NonDoneStep_NoFields(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepWelcome // not Done
+	m := New(w)
+	m.fields = nil // no field → r falls through to return nil
+	newModel, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if newModel == nil {
+		t.Fatal("handleKey returned nil model")
+	}
+	if cmd != nil {
+		t.Errorf("expected nil cmd for 'r' on non-Done step with no fields, got %v", cmd)
+	}
+}
+
+func TestHandleKey_Up_WithFields_WrapsIndex(t *testing.T) {
+	w := newTestWizard()
+	m := New(w)
+	m.fields = []field{{label: "A"}, {label: "B"}, {label: "C"}}
+	m.fieldIdx = 0 // already at top
+	m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	if m.fieldIdx != len(m.fields)-1 {
+		t.Errorf("up at fieldIdx=0 should wrap to %d, got %d", len(m.fields)-1, m.fieldIdx)
 	}
 }
