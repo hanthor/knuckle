@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/coreos/butane v0.27.0
+	github.com/coreos/butane v0.28.0
 	golang.org/x/crypto v0.50.0
 )
 
