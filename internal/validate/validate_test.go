@@ -1,6 +1,8 @@
 package validate
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -174,6 +176,40 @@ func TestDiskPath(t *testing.T) {
 				t.Errorf("DiskPath(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestBlockDevice_NotExist(t *testing.T) {
+	err := BlockDevice("/dev/knuckle-nonexistent-device-xyz")
+	if err == nil {
+		t.Fatal("expected error for non-existent device, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention 'not found', got: %v", err)
+	}
+}
+
+func TestBlockDevice_NotABlockDevice(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "not-a-block-device-*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	err = BlockDevice(f.Name())
+	if err == nil {
+		t.Fatal("expected error for regular file, got nil")
+	}
+	if !strings.Contains(err.Error(), "not a block device") {
+		t.Errorf("error should mention 'not a block device', got: %v", err)
+	}
+}
+
+func TestBlockDevice_StatError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "no-access", "dev")
+	err := BlockDevice(path)
+	if err == nil {
+		t.Fatal("expected error for inaccessible path, got nil")
 	}
 }
 

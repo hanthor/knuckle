@@ -556,6 +556,7 @@ func TestResolveSysexts_NotFound(t *testing.T) {
 		Network: NetworkConfig{Mode: "dhcp"},
 		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
 		Sysexts: []string{"nonexistent-sysext"},
+		DryRun:  true,
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -577,6 +578,7 @@ func TestResolveSysexts_CatalogError(t *testing.T) {
 		Network: NetworkConfig{Mode: "dhcp"},
 		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
 		Sysexts: []string{"docker"},
+		DryRun:  true,
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -1136,7 +1138,7 @@ func TestRun_ContextCancellation(t *testing.T) {
 		Disk:           "/dev/vdb",
 		UpdateStrategy: "reboot",
 		Reboot:         true,
-		DryRun:         false, // reboot path
+		DryRun:         true, // skip block-device check; test focuses on context cancellation during install
 	}
 
 	// Cancel context immediately

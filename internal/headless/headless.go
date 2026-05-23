@@ -399,6 +399,11 @@ func Run(ctx context.Context, cfg *Config, installer install.Installer, logger *
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
+	if cfg.Disk != "" && !cfg.DryRun {
+		if err := validate.BlockDevice(cfg.Disk); err != nil {
+			return fmt.Errorf("validation failed: disk: %w", err)
+		}
+	}
 	fmt.Println("  ✓ Configuration valid")
 
 	// Step 2: Resolve GitHub SSH keys
