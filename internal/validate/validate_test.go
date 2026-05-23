@@ -194,7 +194,7 @@ func TestBlockDevice_NotABlockDevice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	_ = f.Close()
 	err = BlockDevice(f.Name())
 	if err == nil {
 		t.Fatal("expected error for regular file, got nil")
