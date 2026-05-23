@@ -1,6 +1,6 @@
 # Knuckle
 
-[![codecov](https://codecov.io/gh/projectbluefin/knuckle/graph/badge.svg)](https://codecov.io/gh/projectbluefin/knuckle)
+[![codecov](https://codecov.io/gh/projectbluefin/knuckle/graph/badge.svg)](https://codecov.io/gh/projectbluefin/knuckle) [![Go Report Card](https://goreportcard.com/badge/github.com/projectbluefin/knuckle)](https://goreportcard.com/report/github.com/projectbluefin/knuckle)
 
 A modern, interactive TUI "installer" for [Flatcar Container Linux](https://www.flatcar.org/), designed for bare-metal deployments. Not a real installer because making one would be dumb. There's no reason to make a "Bluefin Server" if Bluefin just gives you a nice tool to use Flatcar. 
 
