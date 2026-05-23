@@ -593,3 +593,68 @@ func TestCleanupIgnitionFile_AlreadyRemoved(t *testing.T) {
 		t.Error("ignitionPath should be cleared after cleanup")
 	}
 }
+
+// ── formatCommandError branches ───────────────────────────────────────────────
+
+func TestFormatCommandError_WithStderr(t *testing.T) {
+	r := &runner.Result{ExitCode: 1, Stderr: "  disk not found  "}
+	err := formatCommandError("flatcar-install failed", r, nil)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "exit 1") || !strings.Contains(got, "disk not found") {
+		t.Errorf("unexpected error: %v", got)
+	}
+}
+
+func TestFormatCommandError_NonZeroExitWithErr(t *testing.T) {
+	r := &runner.Result{ExitCode: 2, Stderr: ""}
+	inner := fmt.Errorf("signal: killed")
+	err := formatCommandError("mount failed", r, inner)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "exit 2") || !strings.Contains(got, "signal: killed") {
+		t.Errorf("unexpected error: %v", got)
+	}
+}
+
+func TestFormatCommandError_NonZeroExitNoErr(t *testing.T) {
+	r := &runner.Result{ExitCode: 3, Stderr: ""}
+	err := formatCommandError("mkfs failed", r, nil)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "mkfs failed") || !strings.Contains(got, "exit 3") {
+		t.Errorf("unexpected error: %v", got)
+	}
+	// Should NOT have a wrapping error since inner was nil
+	if strings.Contains(got, "<nil>") {
+		t.Errorf("nil err should not appear in message: %v", got)
+	}
+}
+
+func TestFormatCommandError_NilResultWithErr(t *testing.T) {
+	inner := fmt.Errorf("connection refused")
+	err := formatCommandError("download failed", nil, inner)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "download failed") || !strings.Contains(got, "connection refused") {
+		t.Errorf("unexpected error: %v", got)
+	}
+}
+
+func TestFormatCommandError_NilResultNilErr(t *testing.T) {
+	err := formatCommandError("unknown op", nil, nil)
+	if err == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if err.Error() != "unknown op failed" {
+		t.Errorf("got %q, want %q", err.Error(), "unknown op failed")
+	}
+}

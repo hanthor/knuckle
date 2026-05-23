@@ -345,3 +345,40 @@ func TestDetectLocalSSHKeys_SkipsNonKeyLines(t *testing.T) {
 		t.Errorf("expected 1 key (comment/blank/garbage skipped), got %d: %v", len(keys), keys)
 	}
 }
+
+// ── sysext_list.go: cursor and lookup edge cases ──────────────────────────────
+
+func TestSysextListCursorIdx_NotReady(t *testing.T) {
+	m := New(newTestWizard())
+	m.sysextListReady = false
+	m.cursor = 3
+	if got := m.sysextListCursorIdx(); got != 3 {
+		t.Errorf("sysextListCursorIdx with !ready = %d, want 3", got)
+	}
+}
+
+func TestSysextListCursorIdx_ReadyNoSelection(t *testing.T) {
+	w := newTestWizard()
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "docker", SupportTier: bakery.TierIntegrated},
+	}
+	m := New(w)
+	m.sysextListReady = true
+	m.cursor = 7
+	// sysextList is initialised but has no selected item → falls through to m.cursor
+	if got := m.sysextListCursorIdx(); got != 7 {
+		t.Errorf("sysextListCursorIdx with no selection = %d, want 7", got)
+	}
+}
+
+func TestSysextListLookup_NotFound(t *testing.T) {
+	w := newTestWizard()
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "docker", SupportTier: bakery.TierIntegrated},
+	}
+	m := New(w)
+	// index 99 doesn't exist in the list → should return 0
+	if got := m.sysextListLookup(99); got != 0 {
+		t.Errorf("sysextListLookup(notFound) = %d, want 0", got)
+	}
+}

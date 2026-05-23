@@ -15,6 +15,9 @@ import (
 	"github.com/projectbluefin/knuckle/internal/validate"
 )
 
+// fetchAllChannelsFn is a package-level hook so tests can inject a mock.
+var fetchAllChannelsFn = bakery.FetchAllChannels
+
 // State holds the complete wizard state
 type State struct {
 	CurrentStep model.WizardStep
@@ -381,7 +384,7 @@ func (w *Wizard) FetchSysexts(ctx context.Context) error {
 
 // FetchChannels loads version info for all release channels
 func (w *Wizard) FetchChannels(ctx context.Context) error {
-	channels, err := bakery.FetchAllChannels(ctx)
+	channels, err := fetchAllChannelsFn(ctx)
 	if len(channels) > 0 {
 		// Use whatever channels succeeded; partial failures (e.g. one channel
 		// temporarily unreachable) are not fatal — surface only a total outage.
