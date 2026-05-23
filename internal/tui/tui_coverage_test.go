@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -296,5 +298,50 @@ func TestViewSysext_CursorHighlight(t *testing.T) {
 	out := m.viewSysext()
 	if !strings.Contains(out, "beta") {
 		t.Errorf("cursor item should appear in output: %q", out)
+	}
+}
+
+// ── tui.go: detectLocalSSHKeys ────────────────────────────────────────────────
+
+func TestDetectLocalSSHKeys_MultipleKeysPerFile(t *testing.T) {
+	dir := t.TempDir()
+	sshDir := filepath.Join(dir, ".ssh")
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	content := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 key1\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 key2\n"
+	if err := os.WriteFile(filepath.Join(sshDir, "id_ed25519.pub"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", dir)
+	keys := detectLocalSSHKeys()
+	if len(keys) != 2 {
+		t.Errorf("expected 2 keys from multi-line .pub file, got %d: %v", len(keys), keys)
+	}
+}
+
+func TestDetectLocalSSHKeys_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	keys := detectLocalSSHKeys()
+	if len(keys) != 0 {
+		t.Errorf("expected 0 keys from empty .ssh dir, got %d", len(keys))
+	}
+}
+
+func TestDetectLocalSSHKeys_SkipsNonKeyLines(t *testing.T) {
+	dir := t.TempDir()
+	sshDir := filepath.Join(dir, ".ssh")
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	content := "# comment\nssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC valid-key\n\nnot-a-key garbage\n"
+	if err := os.WriteFile(filepath.Join(sshDir, "id_rsa.pub"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", dir)
+	keys := detectLocalSSHKeys()
+	if len(keys) != 1 {
+		t.Errorf("expected 1 key (comment/blank/garbage skipped), got %d: %v", len(keys), keys)
 	}
 }

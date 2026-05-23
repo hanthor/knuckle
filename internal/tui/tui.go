@@ -1282,9 +1282,11 @@ func detectLocalSSHKeys() []string {
 		if err != nil {
 			continue
 		}
-		key := strings.TrimSpace(string(data))
-		if strings.HasPrefix(key, "ssh-") || strings.HasPrefix(key, "ecdsa-") || strings.HasPrefix(key, "sk-") {
-			keys = append(keys, key)
+		for _, line := range strings.Split(string(data), "\n") {
+			key := strings.TrimSpace(line)
+			if strings.HasPrefix(key, "ssh-") || strings.HasPrefix(key, "ecdsa-") || strings.HasPrefix(key, "sk-") {
+				keys = append(keys, key)
+			}
 		}
 	}
 	return keys
