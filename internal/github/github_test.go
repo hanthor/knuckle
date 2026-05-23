@@ -178,7 +178,7 @@ func TestClient_FetchKeys_CapAt50(t *testing.T) {
 	// Serve 55 SSH keys — FetchKeys should cap at 50.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for i := 0; i < 55; i++ {
-			fmt.Fprintf(w, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 key%d\n", i)
+			_, _ = fmt.Fprintf(w, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 key%d\n", i)
 		}
 	}))
 	defer srv.Close()
