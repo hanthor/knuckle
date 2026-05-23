@@ -1599,3 +1599,198 @@ func TestValidate_SwapSizeAtMax(t *testing.T) {
 		t.Errorf("size_mb at exact maximum should be valid, got: %v", err)
 	}
 }
+
+// ── Validate() coverage gaps ──────────────────────────────────────────────────
+
+func TestValidate_InvalidVersion(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Version: "not-a-version",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{Mode: "dhcp"},
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid version string, got nil")
+	}
+	if !strings.Contains(err.Error(), "version") {
+		t.Errorf("error should mention 'version', got: %v", err)
+	}
+}
+
+func TestValidate_StaticNetworkInvalidInterfaceName(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{
+			Mode:      "static",
+			Interface: "bad interface name!",
+			Address:   "192.168.1.10/24",
+		},
+		Users: []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid interface name, got nil")
+	}
+	if !strings.Contains(err.Error(), "network interface") {
+		t.Errorf("error should mention 'network interface', got: %v", err)
+	}
+}
+
+func TestValidate_StaticNetworkInvalidCIDRAddress(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{
+			Mode:      "static",
+			Interface: "eth0",
+			Address:   "not-a-cidr",
+		},
+		Users: []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid CIDR address, got nil")
+	}
+	if !strings.Contains(err.Error(), "network address") {
+		t.Errorf("error should mention 'network address', got: %v", err)
+	}
+}
+
+func TestValidate_UserInvalidSSHKey(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{Mode: "dhcp"},
+		Users: []UserConfig{{
+			Username: "core",
+			SSHKeys:  []string{"not-a-valid-ssh-key"},
+		}},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid SSH key, got nil")
+	}
+	if !strings.Contains(err.Error(), "ssh_keys") {
+		t.Errorf("error should mention 'ssh_keys', got: %v", err)
+	}
+}
+
+func TestValidate_TailscaleInvalidMode(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{Mode: "dhcp"},
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Tailscale: TailscaleConfig{
+			AuthKey: "tskey-auth-kSomeID1234567-SomeSecretThatIsLongEnough",
+			Mode:    "invalid-mode",
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid tailscale mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "tailscale mode") {
+		t.Errorf("error should mention 'tailscale mode', got: %v", err)
+	}
+}
+
+func TestValidate_TailscaleSubnetRouterValidRoutes(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{Mode: "dhcp"},
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Tailscale: TailscaleConfig{
+			AuthKey: "tskey-auth-kSomeID1234567-SomeSecretThatIsLongEnough",
+			Mode:    "subnet-router",
+			Routes:  "10.0.0.0/8",
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected valid subnet-router config, got: %v", err)
+	}
+}
+
+// ── ToInstallConfig() coverage gaps ──────────────────────────────────────────
+
+func TestToInstallConfig_TailscaleDefaultsMode(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{Mode: "dhcp"},
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Tailscale: TailscaleConfig{
+			AuthKey: "tskey-auth-kSomeID1234567-SomeSecretThatIsLongEnough",
+			Mode:    "", // should default to "connect"
+		},
+	}
+	ic, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("ToInstallConfig: %v", err)
+	}
+	if ic.Tailscale.Mode != "connect" {
+		t.Errorf("Tailscale.Mode = %q, want %q", ic.Tailscale.Mode, "connect")
+	}
+}
+
+func TestToInstallConfig_UserCustomGroups(t *testing.T) {
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{Mode: "dhcp"},
+		Users: []UserConfig{{
+			Username: "ops",
+			SSHKeys:  []string{"ssh-ed25519 AAAAC3Nz k"},
+			Groups:   []string{"wheel", "adm"},
+		}},
+	}
+	ic, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("ToInstallConfig: %v", err)
+	}
+	if len(ic.Users) != 1 {
+		t.Fatalf("expected 1 user, got %d", len(ic.Users))
+	}
+	if len(ic.Users[0].Groups) != 2 || ic.Users[0].Groups[0] != "wheel" {
+		t.Errorf("Groups = %v, want [wheel adm]", ic.Users[0].Groups)
+	}
+}
+
+func TestToInstallConfig_DefaultTimezone(t *testing.T) {
+	cfg := &Config{
+		Channel:  "stable",
+		Disk:     "/dev/vdb",
+		Network:  NetworkConfig{Mode: "dhcp"},
+		Users:    []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Timezone: "", // should default to UTC
+	}
+	ic, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("ToInstallConfig: %v", err)
+	}
+	if ic.Timezone != "UTC" {
+		t.Errorf("Timezone = %q, want UTC", ic.Timezone)
+	}
+}
+
+func TestToInstallConfig_NonNilSwap(t *testing.T) {
+	enabled := false
+	cfg := &Config{
+		Channel: "stable",
+		Disk:    "/dev/vdb",
+		Network: NetworkConfig{Mode: "dhcp"},
+		Users:   []UserConfig{{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3Nz k"}}},
+		Swap:    &SwapConfig{Enabled: enabled, SizeMB: 512},
+	}
+	ic, err := cfg.ToInstallConfig()
+	if err != nil {
+		t.Fatalf("ToInstallConfig: %v", err)
+	}
+	if ic.Swap.Enabled != false || ic.Swap.SizeMB != 512 {
+		t.Errorf("Swap = %+v, want {Enabled:false SizeMB:512}", ic.Swap)
+	}
+}
