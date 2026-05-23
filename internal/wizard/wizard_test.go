@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/projectbluefin/knuckle/internal/bakery"
 	"github.com/projectbluefin/knuckle/internal/model"
 )
 
@@ -1872,6 +1873,48 @@ func TestFetchChannels_CancelledContext(t *testing.T) {
 	err := w.FetchChannels(ctx)
 	if err == nil {
 		t.Fatal("FetchChannels with cancelled context: expected error, got nil")
+	}
+}
+
+func TestFetchChannels_SuccessStoresChannels(t *testing.T) {
+	want := []bakery.ChannelInfo{
+		{Channel: "stable", Version: "3510.2.0"},
+		{Channel: "beta", Version: "3520.0.0"},
+	}
+	old := fetchAllChannelsFn
+	fetchAllChannelsFn = func(_ context.Context) ([]bakery.ChannelInfo, error) {
+		return want, nil
+	}
+	defer func() { fetchAllChannelsFn = old }()
+
+	w, _, _, _ := newTestWizard()
+	if err := w.FetchChannels(context.Background()); err != nil {
+		t.Fatalf("FetchChannels: unexpected error: %v", err)
+	}
+	if len(w.State.Channels) != len(want) {
+		t.Fatalf("got %d channels, want %d", len(w.State.Channels), len(want))
+	}
+	if w.State.Channels[0].Channel != "stable" {
+		t.Errorf("got channel %q, want %q", w.State.Channels[0].Channel, "stable")
+	}
+}
+
+func TestFetchChannels_PartialResultUsed(t *testing.T) {
+	// When some channels succeed and err is non-nil, use the partial result.
+	partial := []bakery.ChannelInfo{{Channel: "stable", Version: "3510.2.0"}}
+	old := fetchAllChannelsFn
+	fetchAllChannelsFn = func(_ context.Context) ([]bakery.ChannelInfo, error) {
+		return partial, fmt.Errorf("beta channel unreachable")
+	}
+	defer func() { fetchAllChannelsFn = old }()
+
+	w, _, _, _ := newTestWizard()
+	err := w.FetchChannels(context.Background())
+	if err != nil {
+		t.Errorf("expected nil error when partial results available, got: %v", err)
+	}
+	if len(w.State.Channels) != 1 {
+		t.Errorf("got %d channels, want 1", len(w.State.Channels))
 	}
 }
 
