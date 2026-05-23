@@ -23,14 +23,14 @@ func TestCheckCatalog_AllCovered(t *testing.T) {
 func TestCheckCatalog_NoneKnown(t *testing.T) {
 	entries := []model.SysextEntry{
 		{Name: "totally-unknown-sysext-xyz", Version: "1.0.0", URL: "https://example.com/x.raw"},
-		{Name: "another-mystery-ext-abc",    Version: "2.0.0", URL: "https://example.com/y.raw"},
+		{Name: "another-mystery-ext-abc", Version: "2.0.0", URL: "https://example.com/y.raw"},
 	}
 	covered, missing := checkCatalog(entries)
 	if covered != 0 {
 		t.Errorf("covered = %d, want 0", covered)
 	}
 	if len(missing) != 2 {
-		t.Errorf("missing count = %d, want 2", len(missing))
+		t.Fatalf("missing count = %d, want 2", len(missing))
 	}
 	if missing[0].Name != "totally-unknown-sysext-xyz" {
 		t.Errorf("missing[0].Name = %q, want totally-unknown-sysext-xyz", missing[0].Name)
@@ -42,16 +42,16 @@ func TestCheckCatalog_NoneKnown(t *testing.T) {
 
 func TestCheckCatalog_Mixed(t *testing.T) {
 	entries := []model.SysextEntry{
-		{Name: "docker",        Version: "28.0.0", URL: "https://example.com/docker.raw"},
-		{Name: "unknown-ext",  Version: "1.0.0",  URL: "https://example.com/unknown.raw"},
-		{Name: "tailscale",    Version: "1.56.1",  URL: "https://example.com/tailscale.raw"},
+		{Name: "docker", Version: "28.0.0", URL: "https://example.com/docker.raw"},
+		{Name: "unknown-ext", Version: "1.0.0", URL: "https://example.com/unknown.raw"},
+		{Name: "tailscale", Version: "1.56.1", URL: "https://example.com/tailscale.raw"},
 	}
 	covered, missing := checkCatalog(entries)
 	if covered != 2 {
 		t.Errorf("covered = %d, want 2 (docker + tailscale)", covered)
 	}
 	if len(missing) != 1 {
-		t.Errorf("missing count = %d, want 1", len(missing))
+		t.Fatalf("missing count = %d, want 1", len(missing))
 	}
 	if missing[0].Name != "unknown-ext" {
 		t.Errorf("missing[0].Name = %q, want unknown-ext", missing[0].Name)
