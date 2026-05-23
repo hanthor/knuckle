@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -139,4 +140,55 @@ func hasValidPrefix(key string) bool {
 		}
 	}
 	return false
+}
+
+func TestClient_FetchKeys_NonOKNonNotFound(t *testing.T) {
+	// Covers the resp.StatusCode != 200 && != 404 path — returns "GitHub returned status N".
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable) // 503
+	}))
+	defer srv.Close()
+
+	client := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+	_, err := client.FetchKeys(context.Background(), "someuser")
+	if err == nil {
+		t.Fatal("expected error for 503 response, got nil")
+	}
+	if !strings.Contains(err.Error(), "503") {
+		t.Errorf("error should mention status code 503, got: %v", err)
+	}
+}
+
+func TestClient_FetchKeys_InvalidUsernameFormat(t *testing.T) {
+	// validate.GitHubUsername rejects usernames with consecutive hyphens or other
+	// invalid characters — exercises the return nil, err path after the empty check.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200) // would succeed if we got this far
+	}))
+	defer srv.Close()
+
+	client := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+	_, err := client.FetchKeys(context.Background(), "--invalid--")
+	if err == nil {
+		t.Fatal("expected error for invalid username format, got nil")
+	}
+}
+
+func TestClient_FetchKeys_CapAt50(t *testing.T) {
+	// Serve 55 SSH keys — FetchKeys should cap at 50.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for i := 0; i < 55; i++ {
+			fmt.Fprintf(w, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 key%d\n", i)
+		}
+	}))
+	defer srv.Close()
+
+	client := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+	keys, err := client.FetchKeys(context.Background(), "biguser")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(keys) != 50 {
+		t.Errorf("expected 50 keys (cap), got %d", len(keys))
+	}
 }
