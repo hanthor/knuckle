@@ -1981,3 +1981,32 @@ func TestIsTailscaleSelected_False_Empty(t *testing.T) {
 		t.Error("expected isTailscaleSelected=false when no sysexts")
 	}
 }
+
+func TestGoToStep_RefusesTailscaleWhenNotSelected(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.CurrentStep = model.StepSysext
+	// Tailscale sysext is not selected
+	w.State.Sysexts = []model.SysextEntry{
+		{Name: "docker", Selected: true},
+	}
+	w.GoToStep(model.StepTailscale)
+	if w.State.CurrentStep == model.StepTailscale {
+		t.Error("GoToStep should refuse StepTailscale when tailscale is not selected")
+	}
+	if w.State.CurrentStep != model.StepSysext {
+		t.Errorf("expected to stay on StepSysext, got %v", w.State.CurrentStep)
+	}
+}
+
+func TestValidateUser_InvalidHostname(t *testing.T) {
+	w, _, _, _ := newTestWizard()
+	w.State.CurrentStep = model.StepUser
+	w.State.Config.Hostname = "-bad-hostname-" // leading hyphen is invalid
+	w.State.Config.Users = []model.UserConfig{
+		{Username: "core", SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGdllynsgXbmcFXhVJAIAkDbYjqZ2OgHgZJVFmFKtvF7 test"}},
+	}
+	err := w.ValidateCurrentStep()
+	if err == nil {
+		t.Fatal("expected error for invalid hostname, got nil")
+	}
+}

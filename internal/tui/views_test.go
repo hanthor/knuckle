@@ -338,3 +338,77 @@ func TestHashPassword_TooLong(t *testing.T) {
 		t.Error("expected error for password > 72 bytes")
 	}
 }
+
+// ── View() top-level dispatch branches ───────────────────────────────────────
+
+func TestView_QuittingReturnsCancel(t *testing.T) {
+	w := newTestWizard()
+	m := New(w)
+	m.quitting = true
+	out := m.View()
+	if out != "Installation cancelled.\n" {
+		t.Errorf("quitting View() = %q, want %q", out, "Installation cancelled.\n")
+	}
+}
+
+func TestView_StepUpdate_RendersContent(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepUpdate
+	m := New(w)
+	// StepUpdate is a non-form step — no activeForm, so View() goes to the switch.
+	out := m.View()
+	if len(out) == 0 {
+		t.Error("View() for StepUpdate returned empty string")
+	}
+}
+
+func TestView_NonFormStep_WithError_ShowsError(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepStorage
+	m := New(w)
+	m.err = fmt.Errorf("unique-storage-error-xyz")
+	out := m.View()
+	if !strings.Contains(out, "unique-storage-error-xyz") {
+		t.Errorf("View() should render m.err in non-form path, got: %q", out)
+	}
+}
+
+// ── viewStorage: removable disk and empty path branches ───────────────────────
+
+func TestViewStorage_RemovableDisk(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepStorage
+	w.State.Disks = []model.DiskInfo{
+		{
+			Model:     "USB Drive",
+			SizeHuman: "32 GB",
+			DevPath:   "/dev/sdb",
+			Path:      "/dev/disk/by-id/usb-drive",
+			Removable: true,
+			Transport: "usb",
+		},
+	}
+	m := New(w)
+	out := m.viewStorage()
+	if !strings.Contains(out, "removable") {
+		t.Errorf("viewStorage should show '(removable)' for removable disks, got: %q", out)
+	}
+}
+
+func TestViewStorage_EmptyPathFallsBackToDevPath(t *testing.T) {
+	w := newTestWizard()
+	w.State.CurrentStep = model.StepStorage
+	w.State.Disks = []model.DiskInfo{
+		{
+			Model:     "NVMe SSD",
+			SizeHuman: "1 TB",
+			DevPath:   "/dev/nvme0n1",
+			Path:      "", // empty — should fall back to DevPath
+		},
+	}
+	m := New(w)
+	out := m.viewStorage()
+	if !strings.Contains(out, "/dev/nvme0n1") {
+		t.Errorf("viewStorage should use DevPath when Path is empty, got: %q", out)
+	}
+}
