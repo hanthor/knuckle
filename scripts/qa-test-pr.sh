@@ -78,7 +78,7 @@ WF_CHANGED=$(gh pr diff "$PR" --repo projectbluefin/knuckle --name-only 2>/dev/n
   | grep -c "^\.github/workflows/" || true)
 
 # ── 2. Complexity gate ────────────────────────────────────────────────────────
-if [[ "$SIZE" == "size:XL" ]] || [[ $DOMAIN_COUNT -gt 4 ]] || [[ $WF_CHANGED -gt 0 ]]; then
+if [[ "$SIZE" == "size:XL" || "$SIZE" == "size:XXL" ]] || [[ $DOMAIN_COUNT -gt 4 ]] || [[ $WF_CHANGED -gt 0 ]]; then
   log "SKIP: complexity gate (size=${SIZE} domains=${DOMAIN_COUNT} wf=${WF_CHANGED})"
   cat > "$REPORT" << EOF
 ## 🧪 Ghost Testlab — PR #${PR} SKIPPED
@@ -219,7 +219,7 @@ _ghost "
   done
   [ \$ok -eq 1 ] || { echo BOOT_TIMEOUT; tail -10 ${WORK_REMOTE}/serial-installer.log >&2; exit 1; }
 " || {
-  _ghost_logs_to_rundir
+  _fetch_artifacts
   { echo "### Installer VM Boot"; echo "**⛔ BOOT TIMEOUT**"; echo; echo "**Verdict: ❌ FAIL**"; } >> "$REPORT"
   cat "$REPORT"; exit 1
 }
