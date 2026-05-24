@@ -565,6 +565,13 @@ func TestCheckConsistency(t *testing.T) {
 			},
 			wantErr: "unknown NVIDIA driver series",
 		},
+		{
+			name: "valid nvidia driver version",
+			modify: func(cfg *model.InstallConfig) {
+				cfg.NvidiaDriverVersion = "570-open"
+			},
+			wantErr: "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
