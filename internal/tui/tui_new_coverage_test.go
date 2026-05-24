@@ -549,8 +549,8 @@ func TestHandleEnter_User_GitHubField_TriggersAsyncFetch(t *testing.T) {
 	w.State.Config.Hostname = "test"
 	w.State.Config.Users = []model.UserConfig{{Username: "core"}}
 	m := New(w)
-	m.activeForm = nil  // bypass huh form → raw field path
-	m.initStepFields()  // populates m.fields including github_user
+	m.activeForm = nil // bypass huh form → raw field path
+	m.initStepFields() // populates m.fields including github_user
 
 	for i, f := range m.fields {
 		if f.key == "github_user" {
