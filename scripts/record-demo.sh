@@ -40,7 +40,7 @@ printf '{"ignition":{"version":"3.4.0"},"passwd":{"users":[{"name":"core","sshAu
   -display none -daemonize -pidfile .vm/qemu.pid -serial file:.vm/demo-serial.log
 
 echo "   Waiting for VM SSH..."
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   ssh $SSH_OPTS -o ConnectTimeout=3 -i .vm/e2e_key -p 2222 core@127.0.0.1 true 2>/dev/null && break
   sleep 3
 done
