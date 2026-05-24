@@ -49,7 +49,8 @@ fi
 # ── Extract model.go entries ──────────────────────────────────────────────────
 echo ""
 echo "Driver series in model.go NvidiaDriverOptions:"
-MODEL_IDS=$(grep -oE 'ID:\s+"[^"]+"' "$MODEL_GO" | grep -A1 -B0 '.' | \
+MODEL_IDS=$(awk '/NvidiaDriverOptions/,/^\}/' "$MODEL_GO" | \
+  grep -oE 'ID:\s+"[^"]+"' | \
   sed 's/.*ID:\s*"\([^"]*\)".*/\1/' | sort -u)
 
 while IFS= read -r id; do
