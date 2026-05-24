@@ -57,6 +57,7 @@ kv_apply_vm() {
   local name="$1"
   local root_path="/var/tmp/knuckle-test/${name}-raw.img"
   local tgt_path="/var/tmp/knuckle-test/${name}-target.img"
+  # shellcheck disable=SC2087 # intentional: ${name} vars expand locally before ssh receives heredoc
   ssh $GOPTS "$GHOST" kubectl apply -f - << YAML
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -258,6 +259,7 @@ kv_boot_installed() {
   done
 
   # Create a new minimal VM: only the installed target disk, no installer disk
+  # shellcheck disable=SC2087 # intentional: ${name} vars expand locally before ssh receives heredoc
   ssh $GOPTS "$GHOST" kubectl apply -f - << YAML
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine

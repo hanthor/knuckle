@@ -55,14 +55,18 @@ test:
 GOLANGCI_LINT_VERSION := "2.12.2"
 GOLANGCI_LINT := ".tools/golangci-lint"
 
+SHELLCHECK_VERSION := "0.10.0"
+SHELLCHECK := ".tools/shellcheck"
+
 # Install pinned tool binaries (idempotent — run once after clone, or after version bump)
 tools:
     just _install-golangci-lint
+    just _install-shellcheck
     go tool govulncheck -version
     @echo "tools ok"
 
 # Full CI (tidy + fmt-check + vet + lint + vuln + test-race + cover-check + headless-e2e + build)
-ci: _install-golangci-lint
+ci: _install-golangci-lint _install-shellcheck
     go mod tidy
     @git diff --exit-code go.mod go.sum || (echo "go.mod/go.sum dirty after tidy" && exit 1)
     just fmt-check
@@ -72,6 +76,7 @@ ci: _install-golangci-lint
     go test -race ./...
     just cover-check
     just headless-test
+    just shell-lint
     just build
 
 # Check formatting (CI gate — fails if any file would change)
@@ -1041,6 +1046,35 @@ _install-golangci-lint:
         "golangci-lint-{{GOLANGCI_LINT_VERSION}}-${OS}-${ARCH}/golangci-lint"
     chmod +x "{{GOLANGCI_LINT}}"
     echo "golangci-lint v{{GOLANGCI_LINT_VERSION}} installed to {{GOLANGCI_LINT}}"
+
+# Lint all bash scripts with shellcheck
+shell-lint: _install-shellcheck
+    {{SHELLCHECK}} --severity=warning \
+      scripts/qa-test-pr.sh \
+      scripts/build-iso.sh \
+      scripts/lib/vm-kubevirt.sh \
+      scripts/fix-ghost-otel-process-noise.sh \
+      scripts/nvidia_check.sh \
+      scripts/drive-demo.sh \
+      scripts/record-demo.sh
+
+_install-shellcheck:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -x "{{SHELLCHECK}}" ]]; then
+        ver=$("{{SHELLCHECK}}" --version 2>&1 | grep -oP 'version \K[0-9.]+' || true)
+        [[ "$ver" == "{{SHELLCHECK_VERSION}}" ]] && exit 0
+        echo "shellcheck version mismatch (got $ver, want {{SHELLCHECK_VERSION}}) — reinstalling"
+    fi
+    mkdir -p .tools
+    ARCH=$(uname -m)
+    URL="https://github.com/koalaman/shellcheck/releases/download/v{{SHELLCHECK_VERSION}}/shellcheck-v{{SHELLCHECK_VERSION}}.linux.${ARCH}.tar.xz"
+    echo "Downloading shellcheck v{{SHELLCHECK_VERSION}}..."
+    curl -sSfL "$URL" | tar -xJf - -C .tools \
+        --strip-components=1 \
+        "shellcheck-v{{SHELLCHECK_VERSION}}/shellcheck"
+    chmod +x "{{SHELLCHECK}}"
+    echo "shellcheck v{{SHELLCHECK_VERSION}} installed to {{SHELLCHECK}}"
 
 [private]
 _ensure-base:
