@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ import (
 
 func main() {
 	strict := flag.Bool("strict", false, "exit 1 if any extensions are missing curated descriptions")
+	arch := flag.String("arch", runtime.GOARCH, "architecture to query (default: host arch)")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -36,8 +38,8 @@ func main() {
 
 	client := bakery.NewHTTPClient()
 
-	fmt.Print("Fetching live bakery catalog (amd64)... ")
-	entries, err := client.FetchCatalogArch(ctx, "amd64")
+	fmt.Printf("Fetching live bakery catalog (%s)... ", *arch)
+	entries, err := client.FetchCatalogArch(ctx, *arch)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\nERROR fetching catalog: %v\n", err)
 		os.Exit(2)
