@@ -69,6 +69,8 @@ VM_NAME=""  # set when VM is allocated; trap uses this
 _cleanup_kv() {
   local exit_code=$?
   [[ -n "${VM_NAME:-}" ]] && kv_delete "${VM_NAME}" 2>/dev/null || true
+  # Clean up worktree (created later in build phase)
+  [[ -n "${WORKTREE:-}" ]] && git worktree remove "$WORKTREE" --force 2>/dev/null || true
   exit "$exit_code"
 }
 trap '_cleanup_kv' EXIT INT TERM
@@ -126,16 +128,18 @@ echo "$TITLE $LABELS" | grep -qi "tailscale" && TIER=3 && NEEDS_BOOT=1
 log "tier=${TIER} needs_boot=${NEEDS_BOOT} security=${DO_SECURITY}"
 
 # ── 4. Build ──────────────────────────────────────────────────────────────────
-PREV=$(git branch --show-current 2>/dev/null || echo "main")
 git fetch upstream "pull/${PR}/head:pr${PR}-qa" -q 2>/dev/null
 SHA=$(git rev-parse "pr${PR}-qa" | head -c 12)
-git stash -q 2>/dev/null || true
-git checkout "pr${PR}-qa" -q
+
+# Use git worktree to isolate PR checkout (avoid mutating dev working tree)
+WORKTREE="/tmp/knuckle-qa-wt-${PR}"
+git worktree add "$WORKTREE" "pr${PR}-qa" 2>/dev/null || {
+  rm -rf "$WORKTREE" 2>/dev/null || true
+  git worktree add "$WORKTREE" "pr${PR}-qa"
+}
 
 log "Building ${SHA}..."
-just build > "${RUNDIR}/build.log" 2>&1 && BUILD_OK=1 || BUILD_OK=0
-git checkout "$PREV" -q 2>/dev/null || true
-git stash pop -q 2>/dev/null || true
+(cd "$WORKTREE" && just build > "${RUNDIR}/build.log" 2>&1) && BUILD_OK=1 || BUILD_OK=0
 
 # ── 5. Report header ──────────────────────────────────────────────────────────
 FLATCAR_VER=$(_ghost "grep -m1 VERSION_ID= /etc/os-release 2>/dev/null | cut -d= -f2" 2>/dev/null || echo "unknown")
@@ -167,9 +171,7 @@ fi
 
 # ── 6. Tier 0 — CI gate ───────────────────────────────────────────────────────
 log "Tier 0: just ci..."
-git checkout "pr${PR}-qa" -q
-just ci > "${RUNDIR}/ci.log" 2>&1 && CI_OK=1 || CI_OK=0
-git checkout "$PREV" -q 2>/dev/null || true
+(cd "$WORKTREE" && just ci > "${RUNDIR}/ci.log" 2>&1) && CI_OK=1 || CI_OK=0
 
 CI_SUMMARY=$(grep -E "^ok |^FAIL|✅|PASS|cover:|error:" "${RUNDIR}/ci.log" | tail -20)
 
